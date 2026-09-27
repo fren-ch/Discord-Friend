@@ -1,0 +1,2 @@
+# Discord-Friend
+qwerty

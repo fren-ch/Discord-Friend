@@ -1,3 +1,7 @@
+
+//This file conneccts Discord and route connections
+
+
 require("dotenv").config();
 
 const {

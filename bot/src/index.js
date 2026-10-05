@@ -1,22 +1,21 @@
-
-//This file conneccts Discord and route connections
-
-
 require("dotenv").config();
 
 const {
   Client,
   GatewayIntentBits,
   Events,
+  MessageFlags,
+  EmbedBuilder,
 } = require("discord.js");
 
-
-
-const { MessageFlags } = require("discord.js");
 const { buildCharacterModal } = require("./commands/character");
+const { handleCharacterModal } = require("./interactions/characterModal");
 const {
-  handleCharacterModal,
-} = require("./interactions/characterModal");
+  connectToDatabase,
+  getCharactersByOwner,
+  getCharacterById,
+} = require("./database/characters");
+
 
 const client = new Client({
   intents: [
@@ -43,10 +42,6 @@ client.on(Events.MessageCreate, (message) => {
   }
 });
 
-
-
-
-
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (
@@ -57,14 +52,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (subcommand === "create") {
         await interaction.showModal(buildCharacterModal());
-      } else {
-        await interaction.reply({
-          content: "This command is not implemented yet.",
-          flags: MessageFlags.Ephemeral,
-        });
+        return;
       }
 
-      return;
+      if (subcommand === "list") {
+        const characters = await getCharactersByOwner(interaction.user.id);
+        const content = characters.length
+          ? characters
+              .map((character) => `${character.name} (ID: ${character._id})`)
+              .join("\n")
+          : "You have no saved characters yet. Use /character create to add one.";
+
+        await interaction.reply({
+          content,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
+
+      if (subcommand === "view") {
+        const id = interaction.options.getString("id", true);
+        const character = await getCharacterById(id, interaction.user.id);
+
+        if (!character) {
+          await interaction.reply({
+            content: "I could not find that profile in your saved characters.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle(character.name)
+          .setDescription(`Profile ID: ${character._id}`)
+          .addFields(
+            { name: "Personality", value: character.personality || "(not set)" },
+            { name: "Backstory", value: character.backstory || "(not set)" },
+            {
+              name: "Speaking style",
+              value: character.speakingStyle || "(not set)",
+            },
+            { name: "Greeting", value: character.greeting || "(not set)" }
+          );
+
+        await interaction.reply({
+          embeds: [embed],
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
     }
 
     if (
@@ -89,7 +127,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+async function startBot() {
+  await connectToDatabase();
+  await client.login(process.env.DISCORD_TOKEN);
+}
 
-
-
-client.login(process.env.DISCORD_TOKEN);
+startBot().catch((error) => {
+  console.error("Bot startup failed:", error);
+  process.exitCode = 1;
+});

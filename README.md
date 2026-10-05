@@ -617,3 +617,69 @@ Phase 1 — Discord Foundation
 This project is intended for educational and experimental use.
 
 License to be determined.
+
+---
+
+## Current Implementation (October 2026)
+
+This section describes what is implemented in the repository today. The architecture, response pipeline, and roadmap above describe the longer-term project vision; they should not be read as features that are already implemented.
+
+### Character Profiles
+
+The bot currently registers a guild-scoped `/character` command with these subcommands:
+
+- `/character create` opens a form for name, personality, backstory, speaking style, and greeting.
+- `/character list` privately lists up to 15 profiles owned by the user, including their IDs.
+- `/character view` privately displays a profile when its ID belongs to the user.
+
+Each saved MongoDB document includes `ownerUserId`, the form fields, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
+
+The database defaults to `discord_friend`, and the collection is `characters`. The MongoDB driver creates an index on `ownerUserId` and `createdAt` during startup.
+
+### Setup and Run
+
+Requirements: Node.js 20.19 or newer, a Discord bot application, and a MongoDB database. MongoDB Atlas is supported.
+
+Create `bot/.env` with your own values:
+
+```dotenv
+DISCORD_TOKEN=your_discord_bot_token
+DISCORD_CLIENT_ID=your_discord_application_id
+DISCORD_GUILD_ID=your_test_server_id
+MONGODB_URI=mongodb+srv://database_user:url_encoded_password@your_atlas_host/?retryWrites=true&w=majority&appName=your_cluster
+MONGODB_DATABASE=discord_friend
+```
+
+The token and application ID must belong to the same Discord application. The guild ID is copied from the test Discord server with Developer Mode enabled. In the Discord Developer Portal, invite the bot with the `bot` and `applications.commands` scopes. The current message listener also uses the privileged Message Content intent.
+
+For MongoDB Atlas, create a database user under **Database Access**, allow the bot computer's IP under **Network Access**, and copy the Node.js URI from **Connect → Drivers**. Use the database user's credentials, not your Atlas website login. For an `mongodb+srv://` connection string, use the hostname exactly as Atlas provides it and do not add a port. URL-encode special characters in the password.
+
+From the repository root:
+
+```powershell
+Set-Location bot
+npm install
+npm start
+```
+
+The start script registers the guild command, connects to MongoDB, then logs the bot in. Leave the terminal running while testing. Press **Ctrl+C** to stop it. In the configured Discord server, try `/character create`, then `/character list`, then `/character view` with an ID from the list.
+
+### Inspecting Data in VS Code
+
+Install the MongoDB for VS Code extension, choose **Add Connection**, and connect to the same Atlas cluster. Browse the `discord_friend` database and `characters` collection. Keep the URI private; do not commit it or post it in chat.
+
+### Security and Development Notes
+
+- `bot/.env` and `bot/node_modules/` are ignored by Git. Keep `bot/package-lock.json` tracked for repeatable installs.
+- Check `git status` before committing and stage only files intended for the update. Never commit `.env` or paste tokens and database URIs into logs or screenshots.
+- If a credential has been exposed, reset it in Discord or Atlas. Removing a secret in a later commit does not remove it from Git history.
+- The current plain-message listener is a development placeholder: it logs message text and gives a fixed reply to `hello`. It does not save chat messages. Review or remove this behavior before using the bot with other people.
+
+### Current Limitations
+
+- LLM integration is not implemented. Character data is not yet sent to a model.
+- Profiles cannot yet be edited or deleted through Discord commands.
+- Conversation history and long-term memory are not stored.
+- Automated tests and production deployment are not configured.
+
+The next planned step is to load a selected character profile from MongoDB and include its relevant traits in an LLM prompt. Before storing or sending conversation history, define user consent, privacy, and retention rules.

@@ -1,3 +1,5 @@
+//This file contains functions for interacting with the characters collection in MongoDB.
+
 const { MongoClient, ObjectId } = require("mongodb");
 
 let mongoClient;

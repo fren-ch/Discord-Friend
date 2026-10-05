@@ -3,6 +3,7 @@
 
 // reads the answers and sends a private confirmation 
 const { MessageFlags } = require("discord.js");
+const { saveCharacter } = require("../database/characters");
 
 async function handleCharacterModal(interaction) {
 
@@ -32,14 +33,10 @@ async function handleCharacterModal(interaction) {
     return;
   }
 
-  // Database saving will go here later.
+  await saveCharacter(character);
 
-
-  // send a private confirmation message to the user
   await interaction.reply({
-    content:
-      `Received the form for ${character.name}!\n` +
-      "This is a form test. Your character has not been saved yet.",
+    content: `Saved ${character.name} to your character profiles.`,
     flags: MessageFlags.Ephemeral,
     allowedMentions: { parse: [] },
   });

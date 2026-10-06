@@ -58,7 +58,6 @@ async function getCharactersByOwner(ownerUserId) {
   return getCollection()
     .find({ ownerUserId })
     .sort({ createdAt: -1 })
-    .limit(15)
     .toArray();
 }
 

@@ -37,18 +37,87 @@ client.on(Events.MessageCreate, (message) => {
 
   console.log(`${message.author.username}: ${message.content}`);
 
-  if (message.content.toLowerCase() === "hello") {
-    message.reply("gay");
-  }
+ 
 });
+
+
+
+
+
+
+
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+
+
+    // Handle autocomplete for the /character chat subcommand
+    // This allows users to search for their characters by name when using the chat command
+    // displays a list of matching characters for the user to select from
+    if (
+      interaction.isAutocomplete() &&
+      interaction.commandName === "character" &&
+      interaction.options.getSubcommand() === "chat"
+    ) {
+      const search = interaction.options.getFocused().toLowerCase();
+      const characters = await getCharactersByOwner(interaction.user.id);
+
+      const choices = characters
+        .filter((character) =>
+          character.name.toLowerCase().includes(search)
+        )
+        .slice(0, 25)
+        .map((character) => ({
+          name: `${character.name} (${character._id.toString().slice(-6)})`,
+          value: character._id.toString(),
+        }));
+
+      await interaction.respond(choices);
+      return;
+    }
+
+    
     if (
       interaction.isChatInputCommand() &&
       interaction.commandName === "character"
     ) {
       const subcommand = interaction.options.getSubcommand();
+
+
+      // Handle the /character subcommands: create, chat, list, view
+
+      if (subcommand === "chat") {  // Handle the /character chat subcommand
+        await interaction.deferReply({
+          flags: MessageFlags.Ephemeral,
+        });
+
+        const characterId = interaction.options.getString("character", true);
+
+        const character = await getCharacterById(
+          characterId,
+          interaction.user.id
+        );
+
+        if (!character) {
+          await interaction.editReply({
+            content: "Please select one of your saved characters.",
+          });
+          return;
+        }
+
+        await interaction.editReply({
+          content: `Selected ${character.name}. Chat setup is working!`,
+          allowedMentions: { parse: [] },
+        });
+
+        return;
+      }
+
+
+
+
+
+
 
       if (subcommand === "create") {
         await interaction.showModal(buildCharacterModal());
@@ -113,6 +182,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (error) {
     console.error("Character interaction failed:", error);
+    
+    const errorReply = {
+      content: "Something went wrong. Please try again.",
+    };
+
+    if (interaction.isRepliable()) {
+      if (interaction.deferred) {
+        await interaction.editReply(errorReply).catch(console.error);
+      } else if (!interaction.replied) {
+        await interaction.reply({
+          ...errorReply,
+          flags: MessageFlags.Ephemeral,
+        }).catch(console.error);
+      }
+    }
 
     if (
       interaction.isRepliable() &&

@@ -126,17 +126,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (subcommand === "list") {
         const characters = await getCharactersByOwner(interaction.user.id);
-        const content = characters.length
-          ? characters
-              .map((character) => `${character.name} (ID: ${character._id})`)
-              .join("\n")
-          : "You have no saved characters yet. Use /character create to add one.";
+        if (!characters.length) {
+          await interaction.reply({
+            content:
+              "You have no saved characters yet. Use /character create to add one.",
+            flags: MessageFlags.Ephemeral,
+            allowedMentions: { parse: [] },
+          });
+          return;
+        }
+
+        const messages = [];
+        let currentMessage = "Your saved characters:\n";
+
+        for (const character of characters) {
+          const line = `${character.name} (ID: ${character._id})`;
+          const nextMessage = `${currentMessage}${line}\n`;
+
+          if (nextMessage.length > 2000) {
+            messages.push(currentMessage.trimEnd());
+            currentMessage = `${line}\n`;
+          } else {
+            currentMessage = nextMessage;
+          }
+        }
+
+        messages.push(currentMessage.trimEnd());
 
         await interaction.reply({
-          content,
+          content: messages[0],
           flags: MessageFlags.Ephemeral,
           allowedMentions: { parse: [] },
         });
+
+        for (const content of messages.slice(1)) {
+          await interaction.followUp({
+            content,
+            flags: MessageFlags.Ephemeral,
+            allowedMentions: { parse: [] },
+          });
+        }
         return;
       }
 

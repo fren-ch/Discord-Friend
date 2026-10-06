@@ -33,6 +33,18 @@ const characterCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("chat")
+      .setDescription("Chat with an existing character")
+      .addStringOption((option) =>
+        option
+          .setName("character")
+          .setDescription("Choose your character")
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("list")
       .setDescription("List your characters")
   )

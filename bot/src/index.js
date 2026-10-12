@@ -10,10 +10,11 @@ const {
   WebhookClient,
 } = require("discord.js");
 
+
+
 const characterWebhook = new WebhookClient({
   url: process.env.CHARACTER_WEBHOOK_URL,
 });
-
 
 const { buildCharacterModal } = require("./commands/character");
 const { handleCharacterModal } = require("./interactions/characterModal");
@@ -85,11 +86,20 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   const threadId = message.channel.id;
+  const receivedAt = performance.now();
   const previousTask =
     conversationQueues.get(threadId) || Promise.resolve();
 
   const task = previousTask.catch(() => {}).then(async () => {
     let exchangeSaved = false;
+    let stage = "loadConversation";
+    const timings = { queueWaitMs: Math.round(performance.now() - receivedAt) };
+    let stageStartedAt = performance.now();
+    const finishStage = (nextStage) => {
+      timings[`${stage}Ms`] = Math.round(performance.now() - stageStartedAt);
+      stage = nextStage;
+      stageStartedAt = performance.now();
+    };
 
     try {
       // Load history after earlier messages have finished.
@@ -97,6 +107,7 @@ client.on(Events.MessageCreate, async (message) => {
         threadId,
         message.author.id
       );
+      finishStage("loadCharacter");
 
       if (!conversation) {
         return;
@@ -106,6 +117,7 @@ client.on(Events.MessageCreate, async (message) => {
         conversation.characterId.toString(),
         message.author.id
       );
+      finishStage("buildInput");
 
       if (!character) {
         return;
@@ -116,10 +128,13 @@ client.on(Events.MessageCreate, async (message) => {
         conversation.messages || [],
         message.content
       );
+      finishStage("sendTyping");
 
       await message.channel.sendTyping().catch(() => {});
+      finishStage("gemini");
 
       const reply = await generateCharacterReply(aiInput);
+      finishStage("saveExchange");
 
       await saveConversationExchange({
         conversationId: conversation._id,
@@ -128,6 +143,7 @@ client.on(Events.MessageCreate, async (message) => {
         assistantReply: reply,
         userCreatedAt: message.createdAt,
       });
+      finishStage("discordDelivery");
 
       exchangeSaved = true;
 
@@ -141,7 +157,21 @@ client.on(Events.MessageCreate, async (message) => {
           allowedMentions: { parse: [] },
         });
       }
+      finishStage("complete");
+      console.log("Character reply timing:", {
+        messageId: message.id,
+        model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+        ...timings,
+        totalMs: Math.round(performance.now() - receivedAt),
+      });
     } catch (error) {
+      console.error("Character reply failed timing:", {
+        messageId: message.id,
+        failedStage: stage,
+        ...timings,
+        failedStageMs: Math.round(performance.now() - stageStartedAt),
+        totalMs: Math.round(performance.now() - receivedAt),
+      });
       console.error("Character conversation failed:", error);
 
       await message.channel.send({
@@ -309,7 +339,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await characterWebhook.send({
           threadId: thread.id,
           username: character.name,
-          avatarURL: "https://i.pinimg.com/736x/6a/c2/70/6ac2705ea2a0a9a5a905f50a3cf4a405.jpg",
+          avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
           content: greeting,
           allowedMentions: { parse: [] },
         });

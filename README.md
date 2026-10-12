@@ -1,3 +1,9 @@
+#TODO
+
+- fix avatar
+- gemini is really slow so either replace it with a faster model or find a way to improve the code so its faster
+
+
 # Discord AI Social Agent
 
 An experimental AI-powered social agent designed to participate naturally in Discord conversations.

@@ -4,6 +4,7 @@
 // reads the answers and sends a private confirmation 
 const { MessageFlags } = require("discord.js");
 const { saveCharacter } = require("../database/characters");
+const { chooseCharacterAvatar } = require("../ai/characterAvatar");
 
 async function handleCharacterModal(interaction) {
 
@@ -33,13 +34,29 @@ async function handleCharacterModal(interaction) {
     return;
   }
 
+  if (!character.name || !character.personality) {
+    await interaction.reply({
+      content: "Please enter a name and personality, not just spaces.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral,
+  });
+
+  character.avatarUrl = await chooseCharacterAvatar(character);
+
   await saveCharacter(character);
 
-  await interaction.reply({
-    content: `Saved ${character.name} to your character profiles.`,
-    flags: MessageFlags.Ephemeral,
+  await interaction.editReply({
+    content: `Saved ${character.name} with a selected avatar.`,
     allowedMentions: { parse: [] },
   });
 }
+
+
+
 
 module.exports = { handleCharacterModal };

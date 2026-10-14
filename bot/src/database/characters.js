@@ -195,7 +195,7 @@ async function saveConversationExchange({
   conversationId,
   ownerUserId,
   userMessage,
-  assistantReply,
+  assistantReplies,
   userCreatedAt,
 }) {
   if (!conversationsCollection) {
@@ -218,11 +218,11 @@ async function saveConversationExchange({
               content: userMessage,
               createdAt: userCreatedAt,
             },
-            {
+            ...assistantReplies.map((content) => ({
               role: "assistant",
-              content: assistantReply,
+              content,
               createdAt: now,
-            },
+            })),
           ],
         },
       },

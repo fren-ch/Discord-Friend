@@ -637,6 +637,7 @@ The bot currently registers a guild-scoped `/character` command with these subco
 - `/character create` opens a form for name, personality, backstory, speaking style, and greeting.
 - `/character list` privately lists up to 15 profiles owned by the user, including their IDs.
 - `/character view` privately displays a profile when its ID belongs to the user.
+- `/character delete` lets you choose an owned profile by name, then asks for confirmation before deleting it, its saved conversation history, and its Discord chat threads.
 
 Each saved MongoDB document includes `ownerUserId`, the form fields, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
 
@@ -668,7 +669,7 @@ npm install
 npm start
 ```
 
-The start script registers the guild command, connects to MongoDB, then logs the bot in. Leave the terminal running while testing. Press **Ctrl+C** to stop it. In the configured Discord server, try `/character create`, then `/character list`, then `/character view` with an ID from the list.
+The start script registers the guild command, connects to MongoDB, then logs the bot in. Leave the terminal running while testing. Press **Ctrl+C** to stop it. In the configured Discord server, try `/character create`, then `/character list`, then `/character view` with an ID from the list. `/character delete` lets you search for a character by name and shows a confirmation prompt before permanently removing the profile, saved history, and threads.
 
 ### Inspecting Data in VS Code
 
@@ -684,8 +685,8 @@ Install the MongoDB for VS Code extension, choose **Add Connection**, and connec
 ### Current Limitations
 
 - LLM integration is not implemented. Character data is not yet sent to a model.
-- Profiles cannot yet be edited or deleted through Discord commands.
-- Conversation history and long-term memory are not stored.
+- Profiles cannot yet be edited through Discord commands.
+- Conversation history is stored, but long-term memory is not implemented.
 - Automated tests and production deployment are not configured.
 
 The next planned step is to load a selected character profile from MongoDB and include its relevant traits in an LLM prompt. Before storing or sending conversation history, define user consent, privacy, and retention rules.

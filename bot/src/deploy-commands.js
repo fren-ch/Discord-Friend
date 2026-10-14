@@ -58,6 +58,18 @@ const characterCommand = new SlashCommandBuilder()
           .setDescription("The character's ID")
           .setRequired(true)
       )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("delete")
+      .setDescription("Delete one of your characters")
+      .addStringOption((option) =>
+        option
+          .setName("character")
+          .setDescription("Choose the character to delete")
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
   );
 
 // checks if the required env are set 

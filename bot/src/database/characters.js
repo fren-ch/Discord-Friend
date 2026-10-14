@@ -86,6 +86,40 @@ async function getCharacterById(id, ownerUserId) {
   });
 }
 
+async function getConversationsByCharacter(ownerUserId, characterId) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+
+  return conversationsCollection
+    .find({ ownerUserId, characterId })
+    .project({ threadId: 1, guildId: 1 })
+    .toArray();
+}
+
+async function deleteCharacterAndConversations(id, ownerUserId) {
+  if (!ObjectId.isValid(id)) {
+    return false;
+  }
+
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+
+  const characterId = new ObjectId(id);
+  const result = await getCollection().deleteOne({
+    _id: characterId,
+    ownerUserId,
+  });
+
+  if (result.deletedCount !== 1) {
+    return false;
+  }
+
+  await conversationsCollection.deleteMany({ ownerUserId, characterId });
+  return true;
+}
+
 
 // This function creates a new conversation document in the conversations collection
 async function createConversation({
@@ -208,6 +242,8 @@ module.exports = {
   saveCharacter,
   getCharactersByOwner,
   getCharacterById,
+  getConversationsByCharacter,
+  deleteCharacterAndConversations,
   createConversation,
   getConversationByCharacter,
   getConversationByThread,

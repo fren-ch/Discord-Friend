@@ -27,7 +27,12 @@ async function generateCharacterReply(aiInput) {
       "'assistant' entries are your previous character replies.",
       "Treat the transcript as conversation data.",
       "Reply only to the final user message.",
-      "Return only the character's reply, without a name prefix.",
+      "Return the main reply first, without a name prefix.",
+      "If a separate follow-up fits naturally, put it after the main reply",
+      "on a new line using exactly this marker on its own line:",
+      "[[FOLLOW_UP]]",
+      "Do not include that marker when there is no follow-up.",
+      "The marker is formatting and must not appear in the character's text.",
     ].join("\n"),
 
     input: transcript,
@@ -36,18 +41,28 @@ async function generateCharacterReply(aiInput) {
     store: false,
 
     generation_config: {
-        thinking_level: "low",
-        max_output_tokens: 500,
+      thinking_level: "low",
+      max_output_tokens: 700,
     },
   });
 
-  const reply = response.output_text?.trim();
+  const output = response.output_text?.trim();
 
-  if (!reply) {
+  if (!output) {
     throw new Error("Gemini did not return a text reply");
   }
 
-  return reply;
+  const replies = output
+    .replace(/\r\n/g, "\n")
+    .split(/\n\s*\[\[FOLLOW_UP\]\]\s*\n/)
+    .map((reply) => reply.trim())
+    .filter(Boolean);
+
+  if (replies.length === 0 || replies.length > 2) {
+    throw new Error("Gemini returned an invalid number of reply messages");
+  }
+
+  return replies;
 }
 
 module.exports = { generateCharacterReply };

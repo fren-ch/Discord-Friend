@@ -75,6 +75,30 @@ function splitDiscordReply(text) {
   return chunks;
 }
 
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function getCompositionDelay(text) {
+  return Math.min(3500, Math.max(700, 500 + text.length * 24));
+}
+
+async function generateReplyWhileTyping(channel, aiInput) {
+  await channel.sendTyping();
+
+  const typingRefresh = setInterval(() => {
+    channel.sendTyping().catch((error) => {
+      console.error("Typing indicator refresh failed:", error);
+    });
+  }, 8000);
+
+  try {
+    return await generateCharacterReply(aiInput);
+  } finally {
+    clearInterval(typingRefresh);
+  }
+}
+
 
 
 client.on(Events.MessageCreate, async (message) => {
@@ -133,34 +157,45 @@ client.on(Events.MessageCreate, async (message) => {
         conversation.messages || [],
         message.content
       );
-      finishStage("sendTyping");
 
-      await message.channel.sendTyping().catch(() => {});
+      finishStage("thinking");
+      if (Math.random() < 0.5) {
+        await wait(700 + Math.floor(Math.random() * 1100));
+      }
       finishStage("gemini");
 
-      const reply = await generateCharacterReply(aiInput);
+      const replies = await generateReplyWhileTyping(message.channel, aiInput);
       finishStage("saveExchange");
 
       await saveConversationExchange({
         conversationId: conversation._id,
         ownerUserId: message.author.id,
         userMessage: message.content,
-        assistantReply: reply,
+        assistantReplies: replies,
         userCreatedAt: message.createdAt,
       });
       finishStage("discordDelivery");
 
       exchangeSaved = true;
 
-      for (const chunk of splitDiscordReply(reply)) {
-        await characterWebhook.send({
-          threadId,
-          username: character.name,
-          avatarURL:
-            character.avatarUrl || DEFAULT_AVATAR_URL,
-          content: chunk,
-          allowedMentions: { parse: [] },
-        });
+      for (let replyIndex = 0; replyIndex < replies.length; replyIndex += 1) {
+        if (replyIndex > 0) {
+          await wait(1200 + Math.floor(Math.random() * 1300));
+        }
+
+        await message.channel.sendTyping();
+        await wait(getCompositionDelay(replies[replyIndex]));
+
+        for (const chunk of splitDiscordReply(replies[replyIndex])) {
+          await characterWebhook.send({
+            threadId,
+            username: character.name,
+            avatarURL:
+              character.avatarUrl || DEFAULT_AVATAR_URL,
+            content: chunk,
+            allowedMentions: { parse: [] },
+          });
+        }
       }
       finishStage("complete");
       console.log("Character reply timing:", {

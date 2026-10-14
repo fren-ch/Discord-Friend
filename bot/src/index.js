@@ -8,6 +8,9 @@ const {
   EmbedBuilder,
   ChannelType,
   WebhookClient,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require("discord.js");
 
 
@@ -25,6 +28,8 @@ const {
   connectToDatabase,
   getCharactersByOwner,
   getCharacterById,
+  getConversationsByCharacter,
+  deleteCharacterAndConversations,
   createConversation,
   getConversationByCharacter,
   getConversationByThread,
@@ -203,15 +208,91 @@ client.on(Events.MessageCreate, async (message) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith("character:delete:")
+    ) {
+      const [, , action, ownerUserId, characterId] =
+        interaction.customId.split(":");
 
+      if (interaction.user.id !== ownerUserId) {
+        await interaction.reply({
+          content: "Only the user who started this deletion can confirm it.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
 
-    // Handle autocomplete for the /character chat subcommand
-    // This allows users to search for their characters by name when using the chat command
-    // displays a list of matching characters for the user to select from
+      if (action === "cancel") {
+        await interaction.update({
+          content: "Character deletion canceled.",
+          components: [],
+        });
+        return;
+      }
+
+      if (action !== "confirm") {
+        return;
+      }
+
+      await interaction.deferUpdate();
+
+      try {
+        const character = await getCharacterById(characterId, ownerUserId);
+        if (!character) {
+          await interaction.editReply({
+            content: "This character is no longer available to delete.",
+            components: [],
+          });
+          return;
+        }
+
+        const conversations = await getConversationsByCharacter(
+          ownerUserId,
+          character._id
+        );
+
+        for (const conversation of conversations) {
+          try {
+            const guild = await client.guilds.fetch(conversation.guildId);
+            const thread = await guild.channels.fetch(conversation.threadId);
+            if (thread) {
+              await thread.delete("Character deleted by its owner");
+            }
+          } catch (error) {
+            if (error.code !== 10003) {
+              throw error;
+            }
+          }
+        }
+
+        const deleted = await deleteCharacterAndConversations(
+          characterId,
+          ownerUserId
+        );
+
+        await interaction.editReply({
+          content: deleted
+            ? `Deleted **${character.name}**, its saved conversation history, and its chat threads.`
+            : "This character was already deleted or is no longer available.",
+          components: [],
+        });
+      } catch (error) {
+        console.error("Character deletion failed:", error);
+        await interaction.editReply({
+          content:
+            "Character deletion could not be completed. Some chat threads may already have been deleted; check your saved characters before retrying.",
+          components: [],
+        });
+      }
+      return;
+    }
+
+    // Let users select their own characters by name for chat and deletion.
     if (
       interaction.isAutocomplete() &&
       interaction.commandName === "character" &&
-      interaction.options.getSubcommand() === "chat"
+      ["chat", "delete"].includes(interaction.options.getSubcommand())
     ) {
       const search = interaction.options.getFocused().toLowerCase();
       const characters = await getCharactersByOwner(interaction.user.id);
@@ -363,13 +444,58 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
+      if (subcommand === "delete") {
+        await interaction.deferReply({
+          flags: MessageFlags.Ephemeral,
+        });
+
+        const characterId = interaction.options.getString("character", true);
+        const character = await getCharacterById(
+          characterId,
+          interaction.user.id
+        );
+        if (!character) {
+          await interaction.editReply({
+            content: "I could not find that profile in your saved characters.",
+          });
+          return;
+        }
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(
+              `character:delete:confirm:${interaction.user.id}:${character._id}`
+            )
+            .setLabel("Delete character")
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId(
+              `character:delete:cancel:${interaction.user.id}:${character._id}`
+            )
+            .setLabel("Cancel")
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.editReply({
+          content:
+            `Are you sure you want to permanently delete **${character.name}**? ` +
+            "This also deletes its saved conversation history and chat threads.",
+          components: [row],
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
+
       if (subcommand === "list") {
+        await interaction.deferReply({
+          flags: MessageFlags.Ephemeral,
+        });
+
         const characters = await getCharactersByOwner(interaction.user.id);
         if (!characters.length) {
-          await interaction.reply({
+          await interaction.editReply({
             content:
               "You have no saved characters yet. Use /character create to add one.",
-            flags: MessageFlags.Ephemeral,
             allowedMentions: { parse: [] },
           });
           return;
@@ -392,9 +518,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         messages.push(currentMessage.trimEnd());
 
-        await interaction.reply({
+        await interaction.editReply({
           content: messages[0],
-          flags: MessageFlags.Ephemeral,
           allowedMentions: { parse: [] },
         });
 
@@ -409,13 +534,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       if (subcommand === "view") {
+        await interaction.deferReply({
+          flags: MessageFlags.Ephemeral,
+        });
+
         const id = interaction.options.getString("id", true);
         const character = await getCharacterById(id, interaction.user.id);
 
         if (!character) {
-          await interaction.reply({
+          await interaction.editReply({
             content: "I could not find that profile in your saved characters.",
-            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -433,9 +561,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
             { name: "Greeting", value: character.greeting || "(not set)" }
           );
 
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [embed],
-          flags: MessageFlags.Ephemeral,
           allowedMentions: { parse: [] },
         });
         return;

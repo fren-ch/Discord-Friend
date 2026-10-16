@@ -18,7 +18,6 @@ const {
 const {
   DISCORD_TOKEN,
   DISCORD_CLIENT_ID,
-  DISCORD_GUILD_ID,
 } = process.env;
 
 
@@ -74,16 +73,16 @@ const characterCommand = new SlashCommandBuilder()
 
 // checks if the required env are set 
 async function deployCommands() {
-  if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) {
+  if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID) {
     throw new Error(
-      "Missing DISCORD_TOKEN, DISCORD_CLIENT_ID, or DISCORD_GUILD_ID in bot/.env"
+      "Missing DISCORD_TOKEN or DISCORD_CLIENT_ID in bot/.env"
     );
   }
 
 // Create a new REST instance and set the bot token 
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
 
-  console.log("Registering the /character command...");
+  console.log("Registered /character globally.");
 
 
   await rest.put(

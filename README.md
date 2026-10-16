@@ -4,6 +4,17 @@
 - gemini is really slow so either replace it with a faster model or find a way to improve the code so its faster
 
 
+
+
+
+
+
+
+
+
+
+
+
 # Discord AI Social Agent
 
 An experimental AI-powered social agent designed to participate naturally in Discord conversations.
@@ -690,3 +701,139 @@ Install the MongoDB for VS Code extension, choose **Add Connection**, and connec
 - Automated tests and production deployment are not configured.
 
 The next planned step is to load a selected character profile from MongoDB and include its relevant traits in an LLM prompt. Before storing or sending conversation history, define user consent, privacy, and retention rules.
+
+
+
+
+
+
+
+
+## Run the Bot and Add It to Other Servers
+
+The bot runs as one hosted process and can serve multiple Discord servers.
+Server owners only need an installation link; they do not need your code,
+API keys, database credentials, or webhook URLs.
+
+### 1. Configure the Discord Application
+
+Open https://discord.com/developers/applications and select your application.
+
+Under **Bot**:
+
+- Enable **Message Content Intent**.
+- Enable **Public Bot** if other people should be able to install it.
+- Leave **Requires OAuth2 Code Grant** disabled for this basic installation flow.
+
+Under **Installation**:
+
+- Enable **Guild Install**.
+- Select **Discord Provided Link**.
+- Configure the Guild Install scopes:
+  - `bot`
+  - `applications.commands`
+
+Give the bot these permissions:
+
+- View Channels
+- Send Messages
+- Send Messages in Threads
+- Read Message History
+- Create Private Threads
+- Manage Webhooks
+- Embed Links
+
+Channel permission overrides must also allow the bot to perform these actions.
+Users need permission to use application commands in the selected channel.
+
+### 2. Configure the Bot Host
+
+Use a host that supports a continuously running Node.js process.
+
+For a service connected to this repository, configure:
+
+- Root directory: `bot`
+- Install command: `npm install`
+- Start command: `npm start`
+- Running instances: `1`
+- Node.js: `22`
+
+Add these environment variables through the hosting dashboard:
+
+```dotenv
+DISCORD_TOKEN=your_bot_token
+DISCORD_CLIENT_ID=your_application_id
+
+MONGODB_URI=your_mongodb_connection_string
+MONGODB_DATABASE=discord_friend
+
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-3.5-flash-lite
+BRAVE_SEARCH_API_KEY=your_brave_search_key
+```
+
+Allow the hosting service to connect to MongoDB Atlas using its Network Access
+settings.
+
+Do not commit or distribute a populated `.env` file.
+The per-channel webhook implementation does not require
+`CHARACTER_WEBHOOK_URL`.
+
+### 3. Start the Bot
+
+For local testing, run from the repository root:
+
+```bash
+cd bot
+npm install
+npm start
+```
+
+The current start script registers the global commands and then starts the bot.
+
+Check the logs for:
+
+```text
+Logged in as ...
+```
+
+Keep the process running. After the hosted copy works, stop your local copy
+to prevent duplicate replies.
+
+### 4. Install the Bot in a Server
+
+Copy the installation link from the application's **Installation** page.
+
+Open the link, select **Add to server**, choose a server you are authorized
+to manage, and approve the requested permissions.
+
+The same installation link can be used for other servers. Registering global
+commands does not automatically install the bot into a server.
+
+### 5. Create a Character and Chat
+
+In a regular server text channel:
+
+1. Run `/character create`.
+2. Complete the character form.
+3. Run `/character chat` and select the saved character.
+4. Open the private thread created by the bot.
+5. Send a message inside that thread.
+
+The bot creates or reuses its webhook in the parent text channel.
+Character greetings and replies use the character's saved name and avatar.
+
+No manual webhook setup is required from server owners.
+
+### Troubleshooting
+
+- **No `/character` command:** Confirm the application is installed with the
+  correct scopes, global registration succeeded, and channel command permissions
+  allow access. Refresh Discord if necessary.
+- **Bot is offline:** Check the hosting logs and confirm the process is running.
+- **Thread creation fails:** Check Create Private Threads and channel access.
+- **Webhook creation fails:** Check Manage Webhooks in the parent channel.
+- **Ordinary messages receive no response:** Check Message Content Intent,
+  thread membership, and the runtime logs.
+- **Orange avatar:** Check the `Avatar lookup failed:` message. The character
+  may already have a fallback avatar saved.

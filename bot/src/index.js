@@ -15,9 +15,9 @@ const {
 
 
 
-const characterWebhook = new WebhookClient({
-  url: process.env.CHARACTER_WEBHOOK_URL,
-});
+const {
+  sendCharacterMessage,
+} = require("./discord/characterWebhooks");
 
 const { buildCharacterModal } = require("./commands/character");
 const { handleCharacterModal } = require("./interactions/characterModal");
@@ -152,16 +152,16 @@ client.on(Events.MessageCreate, async (message) => {
 
       exchangeSaved = true;
 
-      for (const chunk of splitDiscordReply(reply)) {
-        await characterWebhook.send({
-          threadId,
-          username: character.name,
-          avatarURL:
-            character.avatarUrl || DEFAULT_AVATAR_URL,
-          content: chunk,
-          allowedMentions: { parse: [] },
-        });
-      }
+
+
+
+      await sendCharacterMessage(thread, {
+        username: character.name,
+        avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
+        content: greeting,
+      });
+
+
       finishStage("complete");
       console.log("Character reply timing:", {
         messageId: message.id,

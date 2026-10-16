@@ -53,26 +53,97 @@ client.once(Events.ClientReady, (readyClient) => {
 
 // Each thread processes one message at a time.
 const conversationQueues = new Map();
+const MAX_CHAT_MESSAGE_LENGTH = 420;
+const sentenceSegmenter = new Intl.Segmenter(undefined, {
+  granularity: "sentence",
+});
 
-// Split long replies into messages that fit Discord's limit.
+// Split replies into short, sentence-sized messages rather than large blocks.
 function splitDiscordReply(text) {
   const chunks = [];
   let chunk = "";
 
-  for (const character of text) {
-    if (chunk.length + character.length > 2000) {
+  const flush = () => {
+    if (chunk) {
       chunks.push(chunk);
       chunk = "";
     }
+  };
 
-    chunk += character;
-  }
+  const appendSentence = (sentence) => {
+    const candidate = chunk ? `${chunk} ${sentence}` : sentence;
+    if (
+      candidate.length <= MAX_CHAT_MESSAGE_LENGTH &&
+      (!chunk || Math.random() < 0.5)
+    ) {
+      chunk = candidate;
+      return;
+    }
 
-  if (chunk) {
-    chunks.push(chunk);
+    flush();
+
+    if (sentence.length <= MAX_CHAT_MESSAGE_LENGTH) {
+      chunk = sentence;
+      return;
+    }
+
+    for (const word of sentence.match(/\S+/gu) || [sentence]) {
+      if (word.length > MAX_CHAT_MESSAGE_LENGTH) {
+        flush();
+        const characters = Array.from(word);
+        for (let index = 0; index < characters.length; index += MAX_CHAT_MESSAGE_LENGTH) {
+          chunks.push(
+            characters.slice(index, index + MAX_CHAT_MESSAGE_LENGTH).join("")
+          );
+        }
+        continue;
+      }
+
+      const wordCandidate = chunk ? `${chunk} ${word}` : word;
+      if (wordCandidate.length > MAX_CHAT_MESSAGE_LENGTH) {
+        flush();
+      }
+      chunk = chunk ? `${chunk} ${word}` : word;
+    }
+    flush();
+  };
+
+  for (const paragraph of text.split(/\n+/u)) {
+    for (const { segment } of sentenceSegmenter.segment(paragraph.trim())) {
+      const sentence = segment.trim();
+      if (sentence) {
+        appendSentence(sentence);
+      }
+    }
+    flush();
   }
 
   return chunks;
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function getCompositionDelay(text) {
+  const typingRate = 10 + Math.random() * 4;
+  return Math.min(7000, Math.max(700, 500 + text.length * typingRate));
+}
+
+async function generateReplyWhileTyping(channel, aiInput) {
+  await channel.sendTyping();
+
+  const typingRefresh = setInterval(() => {
+    channel.sendTyping().catch((error) => {
+      console.error("Typing indicator refresh failed:", error);
+    });
+  }, 8000);
+
+  try {
+    return await generateCharacterReply(aiInput);
+  } finally {
+    clearInterval(typingRefresh);
+  }
 }
 
 
@@ -133,19 +204,22 @@ client.on(Events.MessageCreate, async (message) => {
         conversation.messages || [],
         message.content
       );
-      finishStage("sendTyping");
 
-      await message.channel.sendTyping().catch(() => {});
+      finishStage("thinking");
+      if (Math.random() < 0.5) {
+        await wait(700 + Math.floor(Math.random() * 1100));
+      }
       finishStage("gemini");
 
-      const reply = await generateCharacterReply(aiInput);
+      const replies = await generateReplyWhileTyping(message.channel, aiInput);
+      const replyMessageGroups = replies.map(splitDiscordReply);
       finishStage("saveExchange");
 
       await saveConversationExchange({
         conversationId: conversation._id,
         ownerUserId: message.author.id,
         userMessage: message.content,
-        assistantReply: reply,
+        assistantReplies: replyMessageGroups.flat(),
         userCreatedAt: message.createdAt,
       });
       finishStage("discordDelivery");
@@ -162,6 +236,38 @@ client.on(Events.MessageCreate, async (message) => {
       });
 
 
+      for (
+        let replyIndex = 0;
+        replyIndex < replyMessageGroups.length;
+        replyIndex += 1
+      ) {
+        const messages = replyMessageGroups[replyIndex];
+        for (
+          let messageIndex = 0;
+          messageIndex < messages.length;
+          messageIndex += 1
+        ) {
+          if (replyIndex > 0 || messageIndex > 0) {
+            const isFollowUp = messageIndex === 0;
+            const pause = isFollowUp
+              ? 5640 + Math.floor(Math.random() * 1010)
+              : 3650 + Math.floor(Math.random() * 1990);
+            await wait(pause);
+          }
+
+          const content = messages[messageIndex];
+          await message.channel.sendTyping();
+          await wait(getCompositionDelay(content));
+          await characterWebhook.send({
+            threadId,
+            username: character.name,
+            avatarURL:
+              character.avatarUrl || DEFAULT_AVATAR_URL,
+            content,
+            allowedMentions: { parse: [] },
+          });
+        }
+      }
       finishStage("complete");
       console.log("Character reply timing:", {
         messageId: message.id,

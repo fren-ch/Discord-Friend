@@ -1,3 +1,4 @@
+const { generateWithLimit } = require("../limits/requestLimits");
 const { GoogleGenAI } = require("@google/genai");
 
 const DEFAULT_AVATAR_URL =
@@ -17,7 +18,7 @@ async function buildAvatarQuery(character) {
   });
 
   try {
-    const response = await ai.interactions.create(
+    const response = await generateWithLimit(ai, 
       {
         model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
         store: false,
@@ -195,7 +196,7 @@ async function verifyAvatarImages(character, results) {
     throw new Error("No thumbnails could be checked");
   }
 
-  const response = await ai.interactions.create(
+  const response = await generateWithLimit(ai, 
     {
       model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
       store: false,

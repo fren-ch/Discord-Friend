@@ -1,3 +1,4 @@
+const { generateWithLimit } = require("../limits/requestLimits");
 const { GoogleGenAI } = require("@google/genai");
 
 let ai;
@@ -16,7 +17,7 @@ async function generateCharacterReply(aiInput) {
   // Send the saved messages as a labeled conversation transcript.
   const transcript = JSON.stringify(aiInput.messages, null, 2);
 
-  const response = await ai.interactions.create({
+  const response = await generateWithLimit(ai, {
     model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
 
     system_instruction: [

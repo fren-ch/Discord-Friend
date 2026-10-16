@@ -1,3 +1,4 @@
+const { LimitError, reserveChat } = require("./limits/requestLimits");
 require("dotenv").config();
 
 const {
@@ -163,6 +164,25 @@ client.on(Events.MessageCreate, async (message) => {
 
   const threadId = message.channel.id;
   const receivedAt = performance.now();
+
+  let releaseChat;
+  try {
+    // Check ownership before reserving a slot; reload history in the queue.
+    const ownedConversation = await getConversationByThread(threadId, message.author.id);
+    if (!ownedConversation) return;
+    releaseChat = reserveChat(message.author.id);
+  } catch (error) {
+    if (!(error instanceof LimitError)) {
+      console.error("Chat admission failed:", error);
+    }
+    await message.channel.send({
+      content: error instanceof LimitError
+        ? error.message
+        : "I couldn't check that conversation. Please try again later.",
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
+    return;
+  }
   const previousTask =
     conversationQueues.get(threadId) || Promise.resolve();
 
@@ -229,11 +249,7 @@ client.on(Events.MessageCreate, async (message) => {
 
 
 
-      await sendCharacterMessage(thread, {
-        username: character.name,
-        avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
-        content: greeting,
-      });
+
 
 
       for (
@@ -258,13 +274,10 @@ client.on(Events.MessageCreate, async (message) => {
           const content = messages[messageIndex];
           await message.channel.sendTyping();
           await wait(getCompositionDelay(content));
-          await characterWebhook.send({
-            threadId,
+          await sendCharacterMessage(message.channel, {
             username: character.name,
-            avatarURL:
-              character.avatarUrl || DEFAULT_AVATAR_URL,
+            avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
             content,
-            allowedMentions: { parse: [] },
           });
         }
       }
@@ -299,6 +312,7 @@ client.on(Events.MessageCreate, async (message) => {
   try {
     await task;
   } finally {
+    releaseChat();
     if (conversationQueues.get(threadId) === task) {
       conversationQueues.delete(threadId);
     }
@@ -523,12 +537,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           greeting,
         });
 
-        await characterWebhook.send({
-          threadId: thread.id,
+        await sendCharacterMessage(thread, {
           username: character.name,
           avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
           content: greeting,
-          allowedMentions: { parse: [] },
         });
 
         await interaction.editReply({

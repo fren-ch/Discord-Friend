@@ -23,10 +23,14 @@ const {
 } = require("./discord/characterWebhooks");
 
 const { buildCharacterModal } = require("./commands/character");
-const { handleCharacterModal } = require("./interactions/characterModal");
+const {
+  handleCharacterDetailsButton,
+  handleCharacterModal,
+} = require("./interactions/characterModal");
 const { buildCharacterInput } = require("./ai/characterInput");
 const { generateCharacterReply } = require("./ai/gemini");
 const { DEFAULT_AVATAR_URL } = require("./ai/characterAvatar");
+const { getNextCheckInAt, startCheckInScheduler } = require("./discord/checkIns");
 const {
   connectToDatabase,
   closeDatabase,
@@ -37,6 +41,7 @@ const {
   createConversation,
   getConversationByCharacter,
   getConversationByThread,
+  recordCheckInActivity,
   saveConversationExchange,
 } = require("./database/characters");
 
@@ -56,6 +61,7 @@ process.on("SIGINT", () => { void lifecycle.shutdown("SIGINT"); });
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
+  lifecycle.track(() => startCheckInScheduler(client));
 });
 
 
@@ -180,7 +186,13 @@ client.on(Events.MessageCreate, lifecycle.handle(async (message) => {
     const ownedConversation = await getConversationByThread(threadId, message.author.id);
     if (!ownedConversation) return;
     releaseChat = reserveChat(message.author.id);
+    await recordCheckInActivity(
+      threadId,
+      message.author.id,
+      getNextCheckInAt(message.createdAt)
+    );
   } catch (error) {
+    releaseChat?.();
     if (!(error instanceof LimitError)) {
       console.error("Chat admission failed:", error);
     }
@@ -337,6 +349,14 @@ client.on(Events.MessageCreate, lifecycle.handle(async (message) => {
 
 client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
   try {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith("character:create:continue:")
+    ) {
+      await handleCharacterDetailsButton(interaction);
+      return;
+    }
+
     if (
       interaction.isButton() &&
       interaction.customId.startsWith("character:delete:")
@@ -602,6 +622,7 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
           .setTitle(character.name)
           .setDescription(`Profile ID: ${character._id}`)
           .addFields(
+            { name: "Franchise / source", value: character.franchise || "(not set)" },
             { name: "Personality", value: character.personality || "(not set)" },
             { name: "Backstory", value: character.backstory || "(not set)" },
             {
@@ -621,7 +642,10 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
 
     if (
       interaction.isModalSubmit() &&
-      interaction.customId === "character:create"
+      (
+        interaction.customId === "character:create" ||
+        interaction.customId.startsWith("character:create:details:")
+      )
     ) {
       await handleCharacterModal(interaction);
     }

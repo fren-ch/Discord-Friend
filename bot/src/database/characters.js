@@ -37,6 +37,15 @@ async function connectToDatabase() {
     );
 
 
+    await conversations.createIndex(
+    { ownerUserId: 1, characterId: 1, guildId: 1 },
+    {
+      unique: true,
+      name: "one_conversation_per_user_character_guild",
+    }
+  );
+
+
     charactersCollection = collection;
     conversationsCollection = conversations;
 
@@ -303,7 +312,27 @@ async function markGreetingFailure(conversationId, ownerUserId, status) {
   );
 }
 
+
+let databaseClosing;
+
+function closeDatabase() {
+  if (databaseClosing) return databaseClosing;
+  const client = mongoClient;
+  if (!client) return Promise.resolve();
+
+  databaseClosing = Promise.resolve().then(() => client.close()).finally(() => {
+    if (mongoClient === client) {
+      mongoClient = undefined;
+      charactersCollection = undefined;
+      conversationsCollection = undefined;
+    }
+    databaseClosing = undefined;
+  });
+  return databaseClosing;
+}
+
 module.exports = {
+  closeDatabase,
   claimGreetingDelivery,
   recordGreetingDelivery,
   markGreetingFailure,

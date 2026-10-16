@@ -1,3 +1,4 @@
+const { createLifecycle } = require("./lifecycle");
 const { openCharacterChat, ChatSetupError } = require("./discord/chatRecovery");
 const { LimitError, reserveChat } = require("./limits/requestLimits");
 require("dotenv").config();
@@ -28,6 +29,7 @@ const { generateCharacterReply } = require("./ai/gemini");
 const { DEFAULT_AVATAR_URL } = require("./ai/characterAvatar");
 const {
   connectToDatabase,
+  closeDatabase,
   getCharactersByOwner,
   getCharacterById,
   getConversationsByCharacter,
@@ -46,6 +48,11 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
 });
+
+const lifecycle = createLifecycle({ client, closeDatabase });
+
+process.on("SIGTERM", () => { void lifecycle.shutdown("SIGTERM"); });
+process.on("SIGINT", () => { void lifecycle.shutdown("SIGINT"); });
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
@@ -151,7 +158,7 @@ async function generateReplyWhileTyping(channel, aiInput) {
 
 
 
-client.on(Events.MessageCreate, async (message) => {
+client.on(Events.MessageCreate, lifecycle.handle(async (message) => {
   if (message.author.bot || message.webhookId) {
     return;
   }
@@ -319,7 +326,7 @@ client.on(Events.MessageCreate, async (message) => {
       conversationQueues.delete(threadId);
     }
   }
-});
+}));
 
 
 
@@ -328,7 +335,7 @@ client.on(Events.MessageCreate, async (message) => {
 
 
 
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
   try {
     if (
       interaction.isButton() &&
@@ -637,14 +644,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
   }
-});
+}));
 
 async function startBot() {
   await connectToDatabase();
+  // A signal may arrive while MongoDB is connecting.
+  if (lifecycle.stopping) return;
   await client.login(process.env.DISCORD_TOKEN);
 }
 
-startBot().catch((error) => {
-  console.error("Bot startup failed:", error);
-  process.exitCode = 1;
+lifecycle.track(startBot).catch(() => {
+  void lifecycle.shutdown("startup failure", 1);
 });

@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "description": "An AI-powered Discord social agent.",
   "main": "src/index.js",
+  
   "scripts": {
-    "start": "node src/deploy-commands.js && node src/index.js"
+    "start": "node src/index.js", 
+    "deploy:commands": "node src/deploy-commands.js"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",

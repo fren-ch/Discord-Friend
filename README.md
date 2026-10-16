@@ -1,20 +1,3 @@
-#TODO
-
-- fix avatar
-- gemini is really slow so either replace it with a faster model or find a way to improve the code so its faster
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Discord AI Social Agent
 
 An experimental AI-powered social agent designed to participate naturally in Discord conversations.
@@ -643,16 +626,35 @@ This section describes what is implemented in the repository today. The architec
 
 ### Character Profiles
 
-The bot currently registers a guild-scoped `/character` command with these subcommands:
+The bot registers a global `/character` command with these subcommands:
 
 - `/character create` opens a two-step form for a character's name, optional franchise/source, personality, backstory, speaking style, and greeting. The name is the only required field. Supplying the franchise/source helps Gemini identify the right character and find a matching avatar.
-- `/character list` privately lists up to 15 profiles owned by the user, including their IDs.
+- `/character list` privately lists the user's saved profiles, including their IDs. Each user can save up to 10 profiles.
 - `/character view` privately displays a profile when its ID belongs to the user.
 - `/character delete` lets you choose an owned profile by name, then asks for confirmation before deleting it, its saved conversation history, and its Discord chat threads.
 
-Each saved MongoDB document includes `ownerUserId`, the form fields, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
+Character creation requires a successful image search and Gemini verification of a suitable avatar. If lookup fails, no character is saved. Each saved MongoDB document includes `ownerUserId`, the form fields, `avatarUrl`, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
 
-The database defaults to `discord_friend`, and the collection is `characters`. The MongoDB driver creates an index on `ownerUserId` and `createdAt` during startup.
+The database defaults to `discord_friend`. Character profiles are stored in `characters`; conversations and message history are stored in `conversations`. The bot creates the indexes it needs during startup.
+
+### AI Conversations and Data
+
+The bot sends the selected character profile, recent conversation context, and
+the user's new message to Gemini to generate replies. It stores conversation
+messages in MongoDB, retaining up to 250 messages per conversation; up to the
+most recent 20 are used to generate a reply. Gemini requests do not enable
+provider-side conversation storage.
+
+Automatic character check-ins are enabled by default. After a random 2–48
+hours without user activity, a character can send one check-in in its existing
+private thread. It waits for the user to reply before sending another. Disable
+check-ins by setting `CHECK_INS_ENABLED` to `false` in
+`bot/src/discord/checkIns.js`.
+
+Users should be told that messages are processed by Gemini and saved in the
+bot's MongoDB database. Deleting a character deletes its saved conversations
+and attempts to delete its associated chat threads. Establish an appropriate
+privacy notice, consent process, and retention policy before inviting users.
 
 ### Setup and Run
 
@@ -663,12 +665,18 @@ Create `bot/.env` with your own values:
 ```dotenv
 DISCORD_TOKEN=your_discord_bot_token
 DISCORD_CLIENT_ID=your_discord_application_id
-DISCORD_GUILD_ID=your_test_server_id
-MONGODB_URI=mongodb+srv://database_user:url_encoded_password@your_atlas_host/?retryWrites=true&w=majority&appName=your_cluster
+MONGODB_URI=your_mongodb_connection_string
 MONGODB_DATABASE=discord_friend
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.5-flash-lite
+BRAVE_SEARCH_API_KEY=your_brave_search_api_key
 ```
 
-The token and application ID must belong to the same Discord application. The guild ID is copied from the test Discord server with Developer Mode enabled. In the Discord Developer Portal, invite the bot with the `bot` and `applications.commands` scopes. The current message listener also uses the privileged Message Content intent.
+The token and application ID must belong to the same Discord application.
+Gemini and Brave Search credentials are required: Gemini generates replies and
+verifies avatars, while Brave Search finds avatar candidates. In the Discord
+Developer Portal, invite the bot with the `bot` and `applications.commands`
+scopes. The bot also uses the privileged Message Content intent.
 
 For MongoDB Atlas, create a database user under **Database Access**, allow the bot computer's IP under **Network Access**, and copy the Node.js URI from **Connect → Drivers**. Use the database user's credentials, not your Atlas website login. For an `mongodb+srv://` connection string, use the hostname exactly as Atlas provides it and do not add a port. URL-encode special characters in the password.
 
@@ -677,10 +685,16 @@ From the repository root:
 ```powershell
 Set-Location bot
 npm install
+npm run deploy:commands
 npm start
 ```
 
-The start script registers the guild command, connects to MongoDB, then logs the bot in. Leave the terminal running while testing. Press **Ctrl+C** to stop it. In the configured Discord server, try `/character create`, then `/character list`, then `/character view` with an ID from the list. `/character delete` lets you search for a character by name and shows a confirmation prompt before permanently removing the profile, saved history, and threads.
+Register the global slash command with `npm run deploy:commands` when first
+setting up the bot or whenever its command definition changes. Then `npm start`
+connects to MongoDB and logs the bot in; it does not register commands.
+Leave the process running while testing. Press **Ctrl+C** to stop it. Try
+`/character create`, then `/character list`, `/character view`, and
+`/character delete` in a server where the bot is installed.
 
 ### Inspecting Data in VS Code
 
@@ -691,16 +705,13 @@ Install the MongoDB for VS Code extension, choose **Add Connection**, and connec
 - `bot/.env` and `bot/node_modules/` are ignored by Git. Keep `bot/package-lock.json` tracked for repeatable installs.
 - Check `git status` before committing and stage only files intended for the update. Never commit `.env` or paste tokens and database URIs into logs or screenshots.
 - If a credential has been exposed, reset it in Discord or Atlas. Removing a secret in a later commit does not remove it from Git history.
-- The current plain-message listener is a development placeholder: it logs message text and gives a fixed reply to `hello`. It does not save chat messages. Review or remove this behavior before using the bot with other people.
+- The bot stores conversation message content in MongoDB and sends message context to Gemini. Protect database access and credentials, disclose this processing to users, and establish a retention policy before using the bot with other people.
 
 ### Current Limitations
 
-- LLM integration is not implemented. Character data is not yet sent to a model.
 - Profiles cannot yet be edited through Discord commands.
-- Conversation history is stored, but long-term memory is not implemented.
-- Automated tests and production deployment are not configured.
-
-The next planned step is to load a selected character profile from MongoDB and include its relevant traits in an LLM prompt. Before storing or sending conversation history, define user consent, privacy, and retention rules.
+- The bot uses recent conversation history, but does not implement a separate long-term memory or semantic retrieval system.
+- Automated tests and continuous deployment are not configured. The deployment instructions below describe a manual hosted setup; validate it in a private test server before broader use.
 
 
 
@@ -786,10 +797,13 @@ For local testing, run from the repository root:
 ```bash
 cd bot
 npm install
+npm run deploy:commands
 npm start
 ```
 
-The current start script registers the global commands and then starts the bot.
+Register the global commands with `npm run deploy:commands` before the first
+start and whenever the command definition changes. `npm start` only starts the
+bot process.
 
 Check the logs for:
 
@@ -823,8 +837,8 @@ In a regular server text channel:
 The bot creates or reuses its webhook in the parent text channel.
 Character greetings and replies use the character's saved name and avatar. If
 you leave the greeting blank, the bot generates a short greeting from the
-character's personality, backstory, and speaking style when their first chat
-opens. A greeting you enter yourself is used as-is.
+character's franchise/source, personality, backstory, and speaking style when
+their first chat opens. A greeting you enter yourself is used as-is.
 
 Characters can also send one occasional, low-pressure check-in in their
 existing private thread after a random 2–48 hours without user activity. A
@@ -845,5 +859,8 @@ No manual webhook setup is required from server owners.
 - **Webhook creation fails:** Check Manage Webhooks in the parent channel.
 - **Ordinary messages receive no response:** Check Message Content Intent,
   thread membership, and the runtime logs.
-- **Orange avatar:** Check the `Avatar lookup failed:` message. The character
-  may already have a fallback avatar saved.
+- **Character creation reports an avatar lookup failure:** Check the
+  `Avatar lookup failed:` log, confirm Gemini and Brave Search credentials and
+  quota, and retry. A character is saved only after a suitable avatar is found
+  and verified. Characters created before this requirement may still have a
+  fallback avatar saved.

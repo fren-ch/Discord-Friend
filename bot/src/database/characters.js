@@ -45,6 +45,7 @@ async function connectToDatabase() {
     }
   );
 
+    await conversations.createIndex({ nextCheckInAt: 1 });
 
     charactersCollection = collection;
     conversationsCollection = conversations;
@@ -137,6 +138,7 @@ async function createConversation({
   ownerUserId,
   characterId,
   greeting,
+  nextCheckInAt,
 }) {
   if (!conversationsCollection) {
     throw new Error("MongoDB has not been connected");
@@ -156,6 +158,9 @@ async function createConversation({
       attemptedAt: null,
       messageId: null,
     },
+    nextCheckInAt,
+    checkInStatus: "pending",
+    checkInPendingReply: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -248,6 +253,133 @@ async function saveConversationExchange({
   }
 }
 
+async function recordCheckInActivity(threadId, ownerUserId, nextCheckInAt) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  const result = await conversationsCollection.updateOne(
+    { threadId, ownerUserId },
+    {
+      $set: {
+        nextCheckInAt,
+        checkInStatus: "pending",
+        checkInPendingReply: false,
+        updatedAt: new Date(),
+      },
+    }
+  );
+  if (result.matchedCount !== 1) {
+    throw new Error("Could not update character check-in activity");
+  }
+}
+
+async function getDueCheckIns(now, limit = 10) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  return conversationsCollection
+    .find({
+      nextCheckInAt: { $lte: now },
+      "greetingDelivery.status": "sent",
+      checkInPendingReply: { $ne: true },
+      checkInStatus: { $ne: "sending" },
+    })
+    .sort({ nextCheckInAt: 1 })
+    .limit(limit)
+    .toArray();
+}
+
+async function claimCheckIn(conversationId, now) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  return conversationsCollection.findOneAndUpdate(
+    {
+      _id: conversationId,
+      nextCheckInAt: { $lte: now },
+      "greetingDelivery.status": "sent",
+      checkInPendingReply: { $ne: true },
+      checkInStatus: { $ne: "sending" },
+    },
+    {
+      $set: {
+        checkInStatus: "sending",
+        checkInAttemptedAt: now,
+        updatedAt: now,
+      },
+    },
+    { returnDocument: "after" }
+  );
+}
+
+async function recordCheckInDelivery(conversationId, content, messageId) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  const now = new Date();
+  const result = await conversationsCollection.updateOne(
+    { _id: conversationId, checkInStatus: "sending" },
+    {
+      $set: {
+        checkInStatus: "sent",
+        checkInPendingReply: true,
+        nextCheckInAt: null,
+        checkInMessageId: messageId,
+        updatedAt: now,
+      },
+      $push: {
+        messages: {
+          $each: [{ role: "assistant", content, createdAt: now }],
+          $slice: -250,
+        },
+      },
+    }
+  );
+  if (result.matchedCount !== 1) {
+    throw new Error("Could not record character check-in delivery");
+  }
+}
+
+async function markCheckInFailure(conversationId, { uncertain, retryAt }) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  const result = await conversationsCollection.updateOne(
+    { _id: conversationId, checkInStatus: "sending" },
+    {
+      $set: {
+        checkInStatus: uncertain ? "uncertain" : "failed",
+        checkInPendingReply: uncertain,
+        nextCheckInAt: retryAt,
+        updatedAt: new Date(),
+      },
+    }
+  );
+  if (result.matchedCount !== 1) {
+    throw new Error("Could not record character check-in failure");
+  }
+}
+
+async function recoverStaleCheckIns(staleBefore) {
+  if (!conversationsCollection) {
+    throw new Error("MongoDB has not been connected");
+  }
+  await conversationsCollection.updateMany(
+    {
+      checkInStatus: "sending",
+      checkInAttemptedAt: { $lt: staleBefore },
+    },
+    {
+      $set: {
+        checkInStatus: "uncertain",
+        checkInPendingReply: true,
+        nextCheckInAt: null,
+        updatedAt: new Date(),
+      },
+    }
+  );
+}
+
 
 async function claimGreetingDelivery(conversationId, ownerUserId) {
   if (!conversationsCollection) throw new Error("MongoDB has not been connected");
@@ -333,9 +465,15 @@ function closeDatabase() {
 
 module.exports = {
   closeDatabase,
+  claimCheckIn,
   claimGreetingDelivery,
+  getDueCheckIns,
   recordGreetingDelivery,
+  recordCheckInActivity,
+  recordCheckInDelivery,
   markGreetingFailure,
+  markCheckInFailure,
+  recoverStaleCheckIns,
   connectToDatabase,
   saveCharacter,
   getCharactersByOwner,

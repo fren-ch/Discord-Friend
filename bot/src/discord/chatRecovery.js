@@ -9,6 +9,8 @@ const {
 } = require("../database/characters");
 const { sendCharacterMessage } = require("../discord/characterWebhooks");
 const { DEFAULT_AVATAR_URL } = require("../ai/characterAvatar");
+const { generateCharacterGreeting } = require("../ai/gemini");
+const { getNextCheckInAt } = require("./checkIns");
 
 class ChatSetupError extends Error {}
 
@@ -112,8 +114,18 @@ async function openCharacterChat(interaction, character) {
     if (thread.archived) await thread.setArchived(false);
     await thread.members.add(ownerUserId);
   } else {
-    const greeting = character.greeting?.trim() ||
-      `Hi! I'm ${character.name}. What would you like to talk about?`;
+    let greeting = character.greeting?.trim();
+    if (!greeting) {
+      try {
+        greeting = await generateCharacterGreeting(character);
+      } catch (error) {
+        console.error("Character greeting generation failed:", error);
+        throw new ChatSetupError(
+          "I couldn't generate this character's greeting. Please try /character chat again in a moment."
+        );
+      }
+    }
+
     thread = await interaction.channel.threads.create({
       name: `Chat with ${character.name}`.slice(0, 100),
       type: ChannelType.PrivateThread,
@@ -137,6 +149,7 @@ async function openCharacterChat(interaction, character) {
         ownerUserId,
         characterId: character._id,
         greeting,
+        nextCheckInAt: getNextCheckInAt(),
       });
     } catch (error) {
       // A lost database acknowledgement can look like a failed insert.

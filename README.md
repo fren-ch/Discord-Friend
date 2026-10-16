@@ -645,7 +645,7 @@ This section describes what is implemented in the repository today. The architec
 
 The bot currently registers a guild-scoped `/character` command with these subcommands:
 
-- `/character create` opens a form for name, personality, backstory, speaking style, and greeting.
+- `/character create` opens a two-step form for a character's name, optional franchise/source, personality, backstory, speaking style, and greeting. The name is the only required field. Supplying the franchise/source helps Gemini identify the right character and find a matching avatar.
 - `/character list` privately lists up to 15 profiles owned by the user, including their IDs.
 - `/character view` privately displays a profile when its ID belongs to the user.
 - `/character delete` lets you choose an owned profile by name, then asks for confirmation before deleting it, its saved conversation history, and its Discord chat threads.
@@ -815,13 +815,23 @@ commands does not automatically install the bot into a server.
 In a regular server text channel:
 
 1. Run `/character create`.
-2. Complete the character form.
+2. Enter the name and any optional character details, then click **Continue** for the remaining fields.
 3. Run `/character chat` and select the saved character.
 4. Open the private thread created by the bot.
 5. Send a message inside that thread.
 
 The bot creates or reuses its webhook in the parent text channel.
-Character greetings and replies use the character's saved name and avatar.
+Character greetings and replies use the character's saved name and avatar. If
+you leave the greeting blank, the bot generates a short greeting from the
+character's personality, backstory, and speaking style when their first chat
+opens. A greeting you enter yourself is used as-is.
+
+Characters can also send one occasional, low-pressure check-in in their
+existing private thread after a random 2–48 hours without user activity. A
+character waits for the user to reply before sending another check-in. The
+feature is enabled by default; set `CHECK_INS_ENABLED` to `false` in
+`bot/src/discord/checkIns.js` to turn off all automatic check-ins. Existing
+conversations receive a check-in schedule after the user next sends a message.
 
 No manual webhook setup is required from server owners.
 

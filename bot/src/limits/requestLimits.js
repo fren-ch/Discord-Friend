@@ -1,7 +1,7 @@
 class LimitError extends Error {}
 
 const users = new Map();
-const MAX_GEMINI_ACTIVE = 3;
+const MAX_GEMINI_ACTIVE = 10;
 const MAX_GEMINI_WAITING = 30;
 let geminiActive = 0;
 const geminiWaiting = [];

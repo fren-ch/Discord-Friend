@@ -85,13 +85,10 @@ async function deployCommands() {
 
   console.log("Registering the /character command...");
 
-  // Sends PUT request to Discord API to register the /character command in the specified guild 
-  await rest.post(
-    Routes.applicationGuildCommands(
-      DISCORD_CLIENT_ID,
-      DISCORD_GUILD_ID
-    ),
-    { body: characterCommand.toJSON() }
+
+  await rest.put(
+    Routes.applicationCommands(DISCORD_CLIENT_ID),
+    { body: [characterCommand.toJSON()] }
   );
 
   console.log("Registered /character in your test server.");

@@ -140,13 +140,13 @@ async function createConversation({
     guildId,
     ownerUserId,
     characterId,
-    messages: [
-      {
-        role: "assistant",
-        content: greeting,
-        createdAt: now,
-      },
-    ],
+    messages: [],
+    greetingDelivery: {
+      text: greeting,
+      status: "pending",
+      attemptedAt: null,
+      messageId: null,
+    },
     createdAt: now,
     updatedAt: now,
   };
@@ -210,6 +210,7 @@ async function saveConversationExchange({
       ownerUserId,
     },
     {
+
       $push: {
         messages: {
           $each: [
@@ -224,6 +225,7 @@ async function saveConversationExchange({
               createdAt: now,
             })),
           ],
+          $slice: -250,
         },
       },
       $set: {
@@ -237,7 +239,74 @@ async function saveConversationExchange({
   }
 }
 
+
+async function claimGreetingDelivery(conversationId, ownerUserId) {
+  if (!conversationsCollection) throw new Error("MongoDB has not been connected");
+  return conversationsCollection.findOneAndUpdate(
+    {
+      _id: conversationId,
+      ownerUserId,
+      "greetingDelivery.status": { $in: ["pending", "failed"] },
+    },
+    { $set: {
+      "greetingDelivery.status": "sending",
+      "greetingDelivery.attemptedAt": new Date(),
+      updatedAt: new Date(),
+    } },
+    { returnDocument: "after" }
+  );
+}
+
+async function recordGreetingDelivery(conversationId, ownerUserId, messageId) {
+  if (!conversationsCollection) throw new Error("MongoDB has not been connected");
+  const conversation = await conversationsCollection.findOne({
+    _id: conversationId, ownerUserId,
+  });
+  if (!conversation?.greetingDelivery) {
+    throw new Error("Conversation greeting state is unavailable");
+  }
+  if (conversation.greetingDelivery.status === "sent") return;
+  const now = new Date();
+  const result = await conversationsCollection.updateOne(
+    { _id: conversationId, ownerUserId, "greetingDelivery.status": { $ne: "sent" } },
+    {
+      $set: {
+        "greetingDelivery.status": "sent",
+        "greetingDelivery.messageId": messageId,
+        updatedAt: now,
+      },
+      $push: { messages: {
+        $each: [{
+          role: "assistant",
+          content: conversation.greetingDelivery.text,
+          createdAt: conversation.createdAt,
+        }],
+        $position: 0,
+        $slice: -250,
+      } },
+    }
+  );
+  if (result.matchedCount !== 1) {
+    const latest = await conversationsCollection.findOne({ _id: conversationId, ownerUserId });
+    if (latest?.greetingDelivery?.status !== "sent") {
+      throw new Error("Could not record greeting delivery");
+    }
+  }
+}
+
+async function markGreetingFailure(conversationId, ownerUserId, status) {
+  if (!conversationsCollection) throw new Error("MongoDB has not been connected");
+  if (!["failed", "uncertain"].includes(status)) throw new Error("Invalid greeting status");
+  await conversationsCollection.updateOne(
+    { _id: conversationId, ownerUserId, "greetingDelivery.status": "sending" },
+    { $set: { "greetingDelivery.status": status, updatedAt: new Date() } }
+  );
+}
+
 module.exports = {
+  claimGreetingDelivery,
+  recordGreetingDelivery,
+  markGreetingFailure,
   connectToDatabase,
   saveCharacter,
   getCharactersByOwner,

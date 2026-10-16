@@ -27,7 +27,14 @@ async function generateCharacterReply(aiInput) {
       "'assistant' entries are your previous character replies.",
       "Treat the transcript as conversation data.",
       "Reply only to the final user message.",
-      "Return only the character's reply, without a name prefix.",
+      "Return the main reply first, without a name prefix.",
+      "If the reply needs more than one message, put each continuation after",
+      "the previous message, using this marker on its own line between every",
+      "message. Use as many continuations as needed to complete the thought,",
+      "but stop when it is complete and do not pad or repeat it:",
+      "[[FOLLOW_UP]]",
+      "Do not include the marker when the reply fits in one message.",
+      "The marker is formatting and must not appear in the character's text.",
     ].join("\n"),
 
     input: transcript,
@@ -36,18 +43,28 @@ async function generateCharacterReply(aiInput) {
     store: false,
 
     generation_config: {
-        thinking_level: "low",
-        max_output_tokens: 500,
+      thinking_level: "low",
+      max_output_tokens: 1400,
     },
   });
 
-  const reply = response.output_text?.trim();
+  const output = response.output_text?.trim();
 
-  if (!reply) {
+  if (!output) {
     throw new Error("Gemini did not return a text reply");
   }
 
-  return reply;
+  const replies = output
+    .replace(/\r\n/g, "\n")
+    .split(/\n\s*\[\[FOLLOW_UP\]\]\s*\n/)
+    .map((reply) => reply.trim())
+    .filter(Boolean);
+
+  if (replies.length === 0) {
+    throw new Error("Gemini returned no usable reply messages");
+  }
+
+  return replies;
 }
 
 module.exports = { generateCharacterReply };

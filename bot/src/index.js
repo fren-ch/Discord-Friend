@@ -1,3 +1,4 @@
+const { openCharacterChat, ChatSetupError } = require("./discord/chatRecovery");
 const { LimitError, reserveChat } = require("./limits/requestLimits");
 require("dotenv").config();
 
@@ -53,6 +54,7 @@ client.once(Events.ClientReady, (readyClient) => {
 
 
 // Each thread processes one message at a time.
+const openingConversations = new Set();
 const conversationQueues = new Map();
 const MAX_CHAT_MESSAGE_LENGTH = 420;
 const sentenceSegmenter = new Intl.Segmenter(undefined, {
@@ -441,121 +443,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Handle the /character subcommands: create, chat, list, view
       if (subcommand === "chat") {
-        await interaction.deferReply({
-          flags: MessageFlags.Ephemeral,
-        });
-
-        if (
-          !interaction.inGuild() ||
-          interaction.channel?.type !== ChannelType.GuildText
-        ) {
-          await interaction.editReply({
-            content: "Use this command in a regular server text channel.",
-          });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        if (!interaction.inGuild() || interaction.channel?.type !== ChannelType.GuildText) {
+          await interaction.editReply("Use this command in a regular server text channel.");
           return;
         }
 
         const characterId = interaction.options.getString("character", true);
-
-        const character = await getCharacterById(
-          characterId,
-          interaction.user.id
-        );
-
-        if (!character) {
-          await interaction.editReply({
-            content: "Please select one of your saved characters.",
-          });
+        const openingKey = `${interaction.guildId}:${interaction.user.id}:${characterId}`;
+        if (openingConversations.has(openingKey)) {
+          await interaction.editReply("I'm already opening this character's chat. Please wait.");
           return;
         }
-
-        const existingConversation = await getConversationByCharacter({
-          ownerUserId: interaction.user.id,
-          characterId: character._id,
-          guildId: interaction.guildId,
-        });
-
-        if (existingConversation) {
-          let existingThread;
-
-          try {
-            existingThread = await interaction.guild.channels.fetch(
-              existingConversation.threadId
-            );
-          } catch (error) {
-            // Discord error 10003 means the channel was deleted.
-            if (error.code !== 10003) {
-              throw error;
-            }
-          }
-
-          if (
-            !existingThread ||
-            existingThread.type !== ChannelType.PrivateThread
-          ) {
-            await interaction.editReply({
-              content:
-                "Your saved conversation's thread is unavailable. " +
-                "Your conversation data is still saved.",
-            });
+        openingConversations.add(openingKey);
+        try {
+          const character = await getCharacterById(characterId, interaction.user.id);
+          if (!character) {
+            await interaction.editReply("Please select one of your saved characters.");
             return;
           }
-
-          if (existingThread.archived) {
-            await existingThread.setArchived(false);
-          }
-
-          await existingThread.members.add(interaction.user.id);
-
+          const { thread, resumed, warning } = await openCharacterChat(interaction, character);
           await interaction.editReply({
-            content:
-              `Continue your chat with ${character.name}: ` +
-              `<#${existingThread.id}>`,
+            content: `${resumed ? "Continue your chat" : "Your chat is ready"} with ${character.name}: <#${thread.id}>` +
+              (warning ? `\n${warning}` : ""),
             allowedMentions: { parse: [] },
           });
-          return;
+        } catch (error) {
+          if (!(error instanceof ChatSetupError)) console.error("Chat setup failed:", error);
+          await interaction.editReply({
+            content: error instanceof ChatSetupError
+              ? error.message
+              : "I couldn't finish opening your chat. Check the bot logs and channel permissions.",
+            allowedMentions: { parse: [] },
+          }).catch(console.error);
+        } finally {
+          openingConversations.delete(openingKey);
         }
-
-        const greeting =
-          character.greeting?.trim() ||
-          `Hi! I'm ${character.name}. What would you like to talk about?`;
-
-        const thread = await interaction.channel.threads.create({
-          name: `Chat with ${character.name}`.slice(0, 100),
-          type: ChannelType.PrivateThread,
-          autoArchiveDuration: 1440,
-          invitable: false,
-        });
-
-        await thread.members.add(interaction.user.id);
-
-        await createConversation({
-          threadId: thread.id,
-          guildId: interaction.guildId,
-          ownerUserId: interaction.user.id,
-          characterId: character._id,
-          greeting,
-        });
-
-        await sendCharacterMessage(thread, {
-          username: character.name,
-          avatarURL: character.avatarUrl || DEFAULT_AVATAR_URL,
-          content: greeting,
-        });
-
-        await interaction.editReply({
-          content: `Your chat with ${character.name} is ready: <#${thread.id}>`,
-          allowedMentions: { parse: [] },
-        });
-
         return;
       }
-
-
-
-
-
-
 
       if (subcommand === "create") {
         await interaction.showModal(buildCharacterModal());

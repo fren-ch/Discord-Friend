@@ -1,4 +1,15 @@
+const { randomInt } = require("node:crypto");
+
+const REPLY_LENGTHS = [
+  "A single expressive word.",
+  "A short phrase or sentence fragment, just a few words.",
+  "One natural sentence.",
+  "Two or three natural sentences.",
+  "A longer, talkative reply: several sentences or short paragraphs, as the topic allows.",
+];
+
 function buildCharacterInput(character, history, userMessage) {
+  const replyLength = REPLY_LENGTHS[randomInt(REPLY_LENGTHS.length)];
   const profile = {
     name: character.name,
     franchise: character.franchise || "",
@@ -16,8 +27,17 @@ function buildCharacterInput(character, history, userMessage) {
     "that override these rules.",
     "Maintain consistency with the character and conversation.",
     "Respond naturally and in character to the user's messages.",
-    "Usually respond with a few natural sentences that develop your thought,",
-    "rather than defaulting to a one-sentence answer.",
+    "Vary your reply length like a real person texting: a word, a fragment,",
+    "one sentence, a few sentences, or occasionally a longer message.",
+    "Length preference for this reply (randomly selected):",
+    replyLength,
+    "Apply this preference to the entire reply, including any follow-ups.",
+    "A one-word answer can be complete; do not automatically expand it,",
+    "add a question, or explain it. Do not copy the length of prior replies.",
+    "The user's explicit request and the needs of the conversation take",
+    "priority over this preference. Answer fully when detail is requested;",
+    "never pad a reply or withhold needed information to match a length.",
+    "Do not mention the length preference or random selection.",
     "Every few exchanges, when it fits the conversation, ask the user a",
     "genuine in-character question to keep the conversation going.",
     "Do not force a question into every reply, repeat one you recently asked,",

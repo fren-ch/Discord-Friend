@@ -1,25 +1,54 @@
-const { randomUUID } = require("node:crypto");
 const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
 } = require("discord.js");
-const { saveCharacter, getCharactersByOwner } = require("../database/characters");
-const { buildCharacterDetailsModal } = require("../commands/character");
-const {
-  AvatarLookupError,
-  chooseCharacterAvatar,
-} = require("../ai/characterAvatar");
+const { saveCharacter, getCharactersByOwner, getCharacterById, updateCharacterAvatar } = require("../database/characters");
+const { chooseCharacterAvatar } = require("../ai/characterAvatar");
 const { LimitError, reserveCreation } = require("../limits/requestLimits");
 
-const pendingCharacterDetails = new Map();
-const PENDING_CHARACTER_TTL_MS = 10 * 60 * 1000;
-const MAX_PENDING_CHARACTERS = 1000;
+function avatarRetryRow(characterId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`character:avatar:retry:${characterId}`)
+      .setLabel("Retry avatar lookup")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
 
-function removeExpiredPendingCharacters(now = Date.now()) {
-  for (const [token, pending] of pendingCharacterDetails) {
-    if (pending.expiresAt <= now) pendingCharacterDetails.delete(token);
+async function handleCharacterAvatarRetry(interaction) {
+  const prefix = "character:avatar:retry:";
+  if (!interaction.customId.startsWith(prefix)) return;
+  await interaction.deferUpdate();
+  let release;
+  try {
+    release = reserveCreation(interaction.user.id);
+    const id = interaction.customId.slice(prefix.length);
+    const character = await getCharacterById(id, interaction.user.id);
+    if (!character) {
+      await interaction.editReply({ content: "This saved character is no longer available.", components: [] });
+      return;
+    }
+    const avatarUrl = await chooseCharacterAvatar(character);
+    if (!await updateCharacterAvatar(id, interaction.user.id, avatarUrl)) {
+      await interaction.editReply({ content: "This saved character is no longer available.", components: [] });
+      return;
+    }
+    await interaction.editReply({
+      content: `Updated the avatar for ${character.name}.`,
+      components: [],
+      allowedMentions: { parse: [] },
+    });
+  } catch (error) {
+    if (!(error instanceof LimitError)) console.error("Character avatar retry failed:", error);
+    await interaction.editReply({
+      content: error instanceof LimitError ? error.message
+        : "I couldn't update the avatar. Your character information is still saved. You can retry the lookup.",
+      allowedMentions: { parse: [] },
+    });
+  } finally {
+    release?.();
   }
 }
 
@@ -34,10 +63,17 @@ async function saveNewCharacter(interaction, character) {
       throw new LimitError("You can save up to 10 characters. Delete one before creating another.");
     }
 
-    character.avatarUrl = await chooseCharacterAvatar(character);
-    await saveCharacter(character);
+    try {
+      character.avatarUrl = await chooseCharacterAvatar(character);
+    } catch (error) {
+      console.error("Character avatar lookup failed; saving without an avatar:", error);
+      character.avatarUrl = null;
+    }
+    const saved = await saveCharacter(character);
     await interaction.editReply({
-      content: `Saved ${character.name}.`,
+      content: `Created ${character.name}. You can now chat with ${character.name} by using /character chat.`
+        + (character.avatarUrl ? "" : " Avatar lookup failed, but your character information is saved. You can retry without filling out the form again."),
+      ...(character.avatarUrl ? {} : { components: [avatarRetryRow(saved._id)] }),
       allowedMentions: { parse: [] },
     });
   } catch (error) {
@@ -47,9 +83,7 @@ async function saveNewCharacter(interaction, character) {
     await interaction.editReply({
       content: error instanceof LimitError
         ? error.message
-        : error instanceof AvatarLookupError
-          ? "I couldn't find and verify a suitable character avatar, or avatar lookup is temporarily busy. No character was created. Please try again later."
-          : "I couldn't save that character. Please try again later.",
+        : "I couldn't save that character. Please try again later.",
       allowedMentions: { parse: [] },
     });
   } finally {
@@ -75,94 +109,8 @@ async function handleCharacterModal(interaction) {
       return;
     }
 
-    removeExpiredPendingCharacters();
-    if (pendingCharacterDetails.size >= MAX_PENDING_CHARACTERS) {
-      await interaction.reply({
-        content: "Character creation is busy right now. Please try again shortly.",
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-
-    const token = randomUUID();
-    pendingCharacterDetails.set(token, {
-      userId: interaction.user.id,
-      character,
-      expiresAt: Date.now() + PENDING_CHARACTER_TTL_MS,
-    });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`character:create:continue:${token}`)
-        .setLabel("Continue")
-        .setStyle(ButtonStyle.Primary)
-    );
-    await interaction.reply({
-      content: "Your character details are saved for this form. Continue to the remaining optional fields.",
-      components: [row],
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  const detailsPrefix = "character:create:details:";
-  if (!interaction.customId.startsWith(detailsPrefix)) return;
-
-  const token = interaction.customId.slice(detailsPrefix.length);
-  const pending = pendingCharacterDetails.get(token);
-  if (
-    !pending ||
-    pending.userId !== interaction.user.id ||
-    pending.expiresAt <= Date.now()
-  ) {
-    if (pending?.expiresAt <= Date.now()) {
-      pendingCharacterDetails.delete(token);
-    }
-    await interaction.reply({
-      content: "This character form expired. Please run /character create again.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  pendingCharacterDetails.delete(token);
-  pending.character.speakingStyle =
-    interaction.fields.getTextInputValue("speakingStyle").trim();
-  pending.character.greeting =
-    interaction.fields.getTextInputValue("greeting").trim();
-
-  await saveNewCharacter(interaction, pending.character);
-}
-
-async function handleCharacterDetailsButton(interaction) {
-  const prefix = "character:create:continue:";
-  if (!interaction.customId.startsWith(prefix)) return;
-
-  const token = interaction.customId.slice(prefix.length);
-  const pending = pendingCharacterDetails.get(token);
-  if (
-    !pending ||
-    pending.userId !== interaction.user.id ||
-    pending.expiresAt <= Date.now()
-  ) {
-    if (pending?.expiresAt <= Date.now()) {
-      pendingCharacterDetails.delete(token);
-    }
-    await interaction.reply({
-      content: "This character form expired. Please run /character create again.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  try {
-    await interaction.showModal(buildCharacterDetailsModal(token));
-  } catch (error) {
-    console.error("Could not open character details form:", error);
-    await interaction.reply({
-      content: "I couldn't open the next character form. Please run /character create again.",
-      flags: MessageFlags.Ephemeral,
-    }).catch(console.error);
+    await saveNewCharacter(interaction, character);
   }
 }
 
-module.exports = { handleCharacterDetailsButton, handleCharacterModal };
+module.exports = { handleCharacterModal, handleCharacterAvatarRetry };

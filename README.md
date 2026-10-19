@@ -645,7 +645,7 @@ messages in MongoDB, retaining up to 250 messages per conversation; up to the
 most recent 20 are used to generate a reply. Gemini requests do not enable
 provider-side conversation storage.
 
-Automatic character check-ins are enabled by default. After a random 2–48
+Automatic character check-ins are enabled by default. After a random 1–24
 hours without user activity, a character can send one check-in in its existing
 private thread. It waits for the user to reply before sending another. Disable
 check-ins by setting `CHECK_INS_ENABLED` to `false` in
@@ -841,7 +841,7 @@ character's franchise/source, personality, backstory, and speaking style when
 their first chat opens. A greeting you enter yourself is used as-is.
 
 Characters can also send one occasional, low-pressure check-in in their
-existing private thread after a random 2–48 hours without user activity. A
+existing private thread after a random 1–24 hours without user activity. A
 character waits for the user to reply before sending another check-in. The
 feature is enabled by default; set `CHECK_INS_ENABLED` to `false` in
 `bot/src/discord/checkIns.js` to turn off all automatic check-ins. Existing

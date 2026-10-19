@@ -24,7 +24,7 @@ const {
 
 const { buildCharacterModal } = require("./commands/character");
 const {
-  handleCharacterDetailsButton,
+  handleCharacterAvatarRetry,
   handleCharacterModal,
 } = require("./interactions/characterModal");
 const { buildCharacterInput } = require("./ai/characterInput");
@@ -351,9 +351,9 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
   try {
     if (
       interaction.isButton() &&
-      interaction.customId.startsWith("character:create:continue:")
+      interaction.customId.startsWith("character:avatar:retry:")
     ) {
-      await handleCharacterDetailsButton(interaction);
+      await handleCharacterAvatarRetry(interaction);
       return;
     }
 

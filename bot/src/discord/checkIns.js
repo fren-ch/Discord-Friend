@@ -3,6 +3,7 @@ const {
   claimCheckIn,
   getDueCheckIns,
   getCharacterById,
+  getConversationByThread,
   markCheckInFailure,
   recordCheckInDelivery,
   recoverStaleCheckIns,
@@ -10,20 +11,13 @@ const {
 const { generateCharacterCheckIn } = require("../ai/gemini");
 const { sendCharacterMessage } = require("./characterWebhooks");
 const { DEFAULT_AVATAR_URL } = require("../ai/characterAvatar");
+const { getNextCheckInAt } = require("../ai/checkInPolicy");
 
 // Set false to disable all proactive character check-ins.
 const CHECK_INS_ENABLED = true;
 const CHECK_IN_INTERVAL_MS = 60_000;
-const MIN_CHECK_IN_DELAY_MS = 1 * 60 * 60 * 1000;
-const MAX_CHECK_IN_DELAY_MS = 24 * 60 * 60 * 1000;
 const CHECK_IN_BATCH_SIZE = 10;
 const STALE_CHECK_IN_MS = 10 * 60 * 1000;
-
-function getNextCheckInAt(from = new Date()) {
-  const delay = MIN_CHECK_IN_DELAY_MS +
-    Math.floor(Math.random() * (MAX_CHECK_IN_DELAY_MS - MIN_CHECK_IN_DELAY_MS + 1));
-  return new Date(from.getTime() + delay);
-}
 
 async function processDueCheckIns(client) {
   const now = new Date();
@@ -57,6 +51,12 @@ async function processDueCheckIns(client) {
         character,
         conversation.messages || []
       );
+
+      // A user message or pause request during generation cancels this check-in.
+      const current = await getConversationByThread(conversation.threadId, conversation.ownerUserId);
+      if (!current || current.checkInStatus !== "sending" ||
+          !current.nextCheckInAt ||
+          current.checkInAttemptedAt?.getTime() !== conversation.checkInAttemptedAt?.getTime()) continue;
 
       stage = "send";
       const sent = await sendCharacterMessage(thread, {

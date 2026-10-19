@@ -1,4 +1,5 @@
 const { randomInt } = require("node:crypto");
+const { shouldPauseCheckIns } = require("./checkInPolicy");
 
 const REPLY_LENGTHS = [
   "A single expressive word.",
@@ -24,6 +25,10 @@ function buildCharacterInput(character, history, userMessage) {
   };
 
   const systemInstruction = [
+    ...(shouldPauseCheckIns(userMessage) ? [
+      "Automatic check-ins for this conversation have been paused until the user sends another message.",
+      "Briefly acknowledge their request for space in character. Do not ask a follow-up question or pressure them to stay.",
+    ] : []),
     "You are roleplaying a fictional character in a Discord conversation.",
     "Use the character profile below to guide your personality and voice.",
     "When a franchise/source is provided, treat it as authoritative context",

@@ -149,7 +149,7 @@ async function openCharacterChat(interaction, character) {
         ownerUserId,
         characterId: character._id,
         greeting,
-        nextCheckInAt: getNextCheckInAt(),
+        nextCheckInAt: getNextCheckInAt(new Date(), character),
       });
     } catch (error) {
       // A lost database acknowledgement can look like a failed insert.

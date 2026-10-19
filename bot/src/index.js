@@ -186,10 +186,15 @@ client.on(Events.MessageCreate, lifecycle.handle(async (message) => {
     const ownedConversation = await getConversationByThread(threadId, message.author.id);
     if (!ownedConversation) return;
     releaseChat = reserveChat(message.author.id);
+    const checkInCharacter = await getCharacterById(
+      ownedConversation.characterId.toString(), message.author.id
+    );
     await recordCheckInActivity(
       threadId,
       message.author.id,
-      getNextCheckInAt(message.createdAt)
+      getNextCheckInAt(message.createdAt, checkInCharacter || {}, [
+        ...(ownedConversation.messages || []), { role: "user", content: message.content },
+      ])
     );
   } catch (error) {
     releaseChat?.();
@@ -441,7 +446,7 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
     if (
       interaction.isAutocomplete() &&
       interaction.commandName === "character" &&
-      ["chat", "delete"].includes(interaction.options.getSubcommand())
+      ["chat", "delete", "view"].includes(interaction.options.getSubcommand())
     ) {
       const search = interaction.options.getFocused().toLowerCase();
       const characters = await getCharactersByOwner(interaction.user.id);
@@ -468,7 +473,7 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
       const subcommand = interaction.options.getSubcommand();
 
 
-      // Handle the /character subcommands: create, chat, list, view
+      // Handle the /character subcommands: create, chat, view, delete
       if (subcommand === "chat") {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         if (!interaction.inGuild() || interaction.channel?.type !== ChannelType.GuildText) {
@@ -556,59 +561,12 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
         return;
       }
 
-      if (subcommand === "list") {
-        await interaction.deferReply({
-          flags: MessageFlags.Ephemeral,
-        });
-
-        const characters = await getCharactersByOwner(interaction.user.id);
-        if (!characters.length) {
-          await interaction.editReply({
-            content:
-              "You have no saved characters yet. Use /character create to add one.",
-            allowedMentions: { parse: [] },
-          });
-          return;
-        }
-
-        const messages = [];
-        let currentMessage = "Your saved characters:\n";
-
-        for (const character of characters) {
-          const line = `${character.name} (ID: ${character._id})`;
-          const nextMessage = `${currentMessage}${line}\n`;
-
-          if (nextMessage.length > 2000) {
-            messages.push(currentMessage.trimEnd());
-            currentMessage = `${line}\n`;
-          } else {
-            currentMessage = nextMessage;
-          }
-        }
-
-        messages.push(currentMessage.trimEnd());
-
-        await interaction.editReply({
-          content: messages[0],
-          allowedMentions: { parse: [] },
-        });
-
-        for (const content of messages.slice(1)) {
-          await interaction.followUp({
-            content,
-            flags: MessageFlags.Ephemeral,
-            allowedMentions: { parse: [] },
-          });
-        }
-        return;
-      }
-
       if (subcommand === "view") {
         await interaction.deferReply({
           flags: MessageFlags.Ephemeral,
         });
 
-        const id = interaction.options.getString("id", true);
+        const id = interaction.options.getString("character", true);
         const character = await getCharacterById(id, interaction.user.id);
 
         if (!character) {
@@ -620,7 +578,7 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
 
         const embed = new EmbedBuilder()
           .setTitle(character.name)
-          .setDescription(`Profile ID: ${character._id}`)
+          .setThumbnail(character.avatarUrl || DEFAULT_AVATAR_URL)
           .addFields(
             { name: "Franchise / source", value: character.franchise || "(not set)" },
             { name: "Personality", value: character.personality || "(not set)" },

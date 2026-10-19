@@ -1,5 +1,6 @@
 const { generateWithLimit } = require("../limits/requestLimits");
 const { GoogleGenAI } = require("@google/genai");
+const { getCheckInPolicy } = require("./checkInPolicy");
 
 let ai;
 
@@ -80,7 +81,13 @@ async function generateCharacterCheckIn(character, history) {
       "Write one brief, low-pressure check-in from this fictional character",
       "to someone they have not heard from recently.",
       "Use the character's personality and, when relevant, a detail from the",
-      "recent conversation. Do not guilt, pressure, demand a reply, imply",
+      "recent conversation. Make the check-in distinctly match their personality",
+      "and the relationship actually established in the transcript.",
+      `Attachment style for this check-in: ${getCheckInPolicy(character, history).style}.`,
+      "Needy characters may sound eager, affectionate, or a little insecure.",
+      "Obsessive characters may sound intensely attentive or dramatically attached",
+      "within the fictional roleplay. Reserved characters should remain understated.",
+      "Respect requests for space. Do not guilt, pressure, demand a reply, or imply",
       "Use a supplied franchise/source as authoritative identity context.",
       "knowledge of what the person is doing, or pretend to have memories not",
       "in the transcript. Keep it natural and concise, with no name prefix,",

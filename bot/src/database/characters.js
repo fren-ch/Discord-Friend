@@ -288,7 +288,7 @@ async function getDueCheckIns(now, limit = 10) {
   }
   return conversationsCollection
     .find({
-      nextCheckInAt: { $lte: now },
+      nextCheckInAt: { $type: "date", $lte: now },
       "greetingDelivery.status": "sent",
       checkInPendingReply: { $ne: true },
       checkInStatus: { $ne: "sending" },
@@ -305,7 +305,7 @@ async function claimCheckIn(conversationId, now) {
   return conversationsCollection.findOneAndUpdate(
     {
       _id: conversationId,
-      nextCheckInAt: { $lte: now },
+      nextCheckInAt: { $type: "date", $lte: now },
       "greetingDelivery.status": "sent",
       checkInPendingReply: { $ne: true },
       checkInStatus: { $ne: "sending" },

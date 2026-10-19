@@ -44,18 +44,14 @@ const characterCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName("list")
-      .setDescription("List your characters")
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
       .setName("view")
       .setDescription("View one of your characters")
       .addStringOption((option) =>
         option
-          .setName("id")
-          .setDescription("The character's ID")
+          .setName("character")
+          .setDescription("Choose your character")
           .setRequired(true)
+          .setAutocomplete(true)
       )
   )
   .addSubcommand((subcommand) =>

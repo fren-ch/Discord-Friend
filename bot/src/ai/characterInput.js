@@ -9,7 +9,12 @@ const REPLY_LENGTHS = [
 ];
 
 function buildCharacterInput(character, history, userMessage) {
-  const replyLength = REPLY_LENGTHS[randomInt(REPLY_LENGTHS.length)];
+  // Keep the original 20% one-word preference for terse characters;
+  // half of those slots favor a short phrase for other personalities.
+  const lengthRoll = randomInt(REPLY_LENGTHS.length * 2);
+  const replyLength = lengthRoll === 1
+    ? "Use a single word if terse, blunt, reserved, or minimalist replies fit this character's personality or speaking style; otherwise use a short phrase."
+    : REPLY_LENGTHS[Math.floor(lengthRoll / 2)];
   const profile = {
     name: character.name,
     franchise: character.franchise || "",
@@ -34,6 +39,16 @@ function buildCharacterInput(character, history, userMessage) {
     "Apply this preference to the entire reply, including any follow-ups.",
     "A one-word answer can be complete; do not automatically expand it,",
     "add a question, or explain it. Do not copy the length of prior replies.",
+    "Use one-word replies less often by default, but keep them natural and",
+    "just as available for characters whose personality or speaking style is terse.",
+    "For a one-word reply, normally omit a final period (for example, 'Yeah').",
+    "Include a period when it intentionally adds dramatic emphasis, finality,",
+    "or a deadpan character beat (for example, a decisive 'No.').",
+    "Use question marks, exclamation marks, or ellipses when the tone calls for them.",
+    "For replies of any length, normally omit the final period at the end of",
+    "each message, including follow-ups. Keep periods between sentences so",
+    "the text stays readable. Preserve punctuation within quotes, abbreviations,",
+    "URLs, and code. Keep the dramatic one-word period exception above.",
     "The user's explicit request and the needs of the conversation take",
     "priority over this preference. Answer fully when detail is requested;",
     "never pad a reply or withhold needed information to match a length.",

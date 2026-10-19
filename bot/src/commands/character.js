@@ -28,7 +28,7 @@ function addField(modal, field) {
 function buildCharacterModal() {
     const modal = new ModalBuilder()
         .setCustomId("character:create")
-        .setTitle("Create Character (1/2)");
+        .setTitle("Create Character");
 
     const fields = [
         {
@@ -72,36 +72,4 @@ function buildCharacterModal() {
     return modal;
 }
 
-function buildCharacterDetailsModal(token) {
-    const modal = new ModalBuilder()
-        .setCustomId(`character:create:details:${token}`)
-        .setTitle("Create Character (2/2)");
-
-    const fields = [
-        {
-        id: "speakingStyle",
-        label: "Speaking style (optional)",
-        placeholder: "Short, casual replies with occasional jokes",
-        required: false,
-        maxLength: 500,
-        style: TextInputStyle.Paragraph,
-        },
-        {
-        id: "greeting",
-        label: "Greeting (optional)",
-        placeholder: "Leave blank to generate one from the character profile",
-        required: false,
-        maxLength: 500,
-        style: TextInputStyle.Paragraph,
-        },
-    ];
-
-    for (const field of fields) {
-        addField(modal, field);
-    }
-
-    return modal;
-}
-
-module.exports = { buildCharacterModal, buildCharacterDetailsModal };
-    
+module.exports = { buildCharacterModal };

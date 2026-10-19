@@ -14,8 +14,8 @@ const { DEFAULT_AVATAR_URL } = require("../ai/characterAvatar");
 // Set false to disable all proactive character check-ins.
 const CHECK_INS_ENABLED = true;
 const CHECK_IN_INTERVAL_MS = 60_000;
-const MIN_CHECK_IN_DELAY_MS = 2 * 60 * 60 * 1000;
-const MAX_CHECK_IN_DELAY_MS = 48 * 60 * 60 * 1000;
+const MIN_CHECK_IN_DELAY_MS = 1 * 60 * 60 * 1000;
+const MAX_CHECK_IN_DELAY_MS = 24 * 60 * 60 * 1000;
 const CHECK_IN_BATCH_SIZE = 10;
 const STALE_CHECK_IN_MS = 10 * 60 * 1000;
 

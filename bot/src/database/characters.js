@@ -96,6 +96,15 @@ async function getCharacterById(id, ownerUserId) {
   });
 }
 
+async function updateCharacterAvatar(id, ownerUserId, avatarUrl) {
+  if (!ObjectId.isValid(id)) return false;
+  const result = await getCollection().updateOne(
+    { _id: new ObjectId(id), ownerUserId },
+    { $set: { avatarUrl, updatedAt: new Date() } }
+  );
+  return result.matchedCount === 1;
+}
+
 async function getConversationsByCharacter(ownerUserId, characterId) {
   if (!conversationsCollection) {
     throw new Error("MongoDB has not been connected");
@@ -476,6 +485,7 @@ module.exports = {
   recoverStaleCheckIns,
   connectToDatabase,
   saveCharacter,
+  updateCharacterAvatar,
   getCharactersByOwner,
   getCharacterById,
   getConversationsByCharacter,

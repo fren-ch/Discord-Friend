@@ -1,8 +1,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const vm = require("node:vm");
 const path = require("node:path");
+const vm = require("node:vm");
 
 function setup(answers) {
   const calls = [];
@@ -29,8 +29,17 @@ function setup(answers) {
       if (new URL(url).hostname === "api.search.brave.com") {
         searches.push(new URL(url));
         return { ok: true, async json() {
-          return { results: Array.from({ length: 10 }, (_, i) => ({
-            thumbnail: { src: `https://imgs.search.brave.com/${i + 1}` },
+          const query = searches.at(-1).searchParams.get("q");
+          return { results: Array.from({
+            length: Number(searches.at(-1).searchParams.get("count")),
+          }, (_, i) => ({
+            thumbnail: {
+              src: `https://imgs.search.brave.com/${
+                query.includes("alternative")
+                  ? (i === 0 ? 1 : i + 10)
+                  : i + 1
+              }`,
+            },
           })) };
         } };
       }
@@ -48,33 +57,79 @@ function setup(answers) {
 
 const character = { name: "Spunkbob", franchise: "Spongebob" };
 
-test("normalizes supplied names and searches the second batch after rejection", async () => {
-  const bot = setup(["SpongeBob SquarePants from SpongeBob SquarePants pfp", "none", "Image ID: 2"]);
-  assert.equal(await bot.chooseCharacterAvatar(character), "https://imgs.search.brave.com/7");
+test("verifies and returns up to ten images from the pfp search", async () => {
+  const bot = setup(["SpongeBob SquarePants from SpongeBob SquarePants pfp", "1, 10"]);
+  assert.equal(
+    (await bot.findCharacterAvatars(character)).join(","),
+    "https://imgs.search.brave.com/1,https://imgs.search.brave.com/10"
+  );
+  assert.equal(bot.searches.length, 1);
   assert.equal(bot.searches[0].searchParams.get("q"), "SpongeBob SquarePants from SpongeBob SquarePants pfp");
+  assert.equal(bot.searches[0].searchParams.get("count"), "10");
+  assert.equal(bot.searches[0].searchParams.get("safesearch"), "strict");
   assert.equal(bot.searches[0].searchParams.get("spellcheck"), "true");
-  assert.equal(bot.calls.length, 3);
-  const profile = JSON.parse(bot.calls[1].input[0].text);
-  assert.equal(profile.name, "Spunkbob");
-  assert.equal(profile.searchQuery, bot.searches[0].searchParams.get("q"));
+  assert.equal(bot.calls.length, 2);
+  assert.equal(bot.thumbnails.length, 10);
+  assert.match(bot.calls[1].system_instruction, /gameplay images/i);
+  assert.equal(bot.calls[1].input.filter((part) => part.type === "image").length, 10);
 });
 
-test("stops after the first verified selection", async () => {
-  const bot = setup(["SpongeBob from SpongeBob SquarePants pfp", "1"]);
-  assert.equal(await bot.chooseCharacterAvatar(character), "https://imgs.search.brave.com/1");
-  assert.equal(bot.thumbnails.length, 5);
+test("broadens the search to artwork and screenshots when pfp yields no acceptable image", async () => {
+  const bot = setup([
+    "Joker from Persona 5 pfp",
+    "none",
+    "Joker from Persona 5 character portrait game screenshot",
+    "1, 10",
+  ]);
+  assert.equal(
+    (await bot.findCharacterAvatars({ name: "Joker", franchise: "Persona 5" })).join(","),
+    "https://imgs.search.brave.com/1,https://imgs.search.brave.com/10"
+  );
+  assert.equal(bot.searches.length, 2);
+  assert.match(bot.searches[1].searchParams.get("q"), /screenshot/);
+  assert.match(bot.calls[2].system_instruction, /video game character/i);
 });
 
-test("still fails when neither batch contains a verified avatar", async () => {
-  const bot = setup(["SpongeBob from SpongeBob SquarePants pfp", "none", "none"]);
-  await assert.rejects(bot.chooseCharacterAvatar(character), { name: "AvatarLookupError" });
-  assert.equal(bot.calls.length, 3);
+test("fails when neither the pfp nor expanded search has a suitable image", async () => {
+  const bot = setup([
+    "SpongeBob from SpongeBob SquarePants pfp",
+    "none",
+    "SpongeBob from SpongeBob SquarePants character portrait artwork",
+    "none",
+  ]);
+  await assert.rejects(bot.findCharacterAvatars(character), { name: "AvatarLookupError" });
+  assert.equal(bot.calls.length, 4);
 });
 
-test("does not retry authentication failures as candidate rejections", async () => {
+test("follow-up searches filter out image URLs already shown", async () => {
+  const bot = setup([
+    "Joker from Persona 5 pfp",
+    "1, 2",
+    "Joker from Persona 5 alternative artwork",
+    "1, 3",
+  ]);
+  const firstBatch = await bot.findCharacterAvatars({ name: "Joker", franchise: "Persona 5" });
+  const nextBatch = await bot.findCharacterAvatars(
+    { name: "Joker", franchise: "Persona 5" },
+    firstBatch
+  );
+  assert.equal(firstBatch.join(","), "https://imgs.search.brave.com/1,https://imgs.search.brave.com/2");
+  assert.equal(nextBatch.join(","), "https://imgs.search.brave.com/20");
+  assert.match(bot.calls[2].system_instruction, /follow-up search/i);
+  assert.match(bot.calls[2].system_instruction, /do not require a pfp.*any fixed category/i);
+  assert.match(bot.calls[3].system_instruction, /prefer a varied spread across distinct images/i);
+  assert.match(bot.calls[3].system_instruction, /merchandise, logos, or multi-character images/i);
+  assert.match(bot.searches[1].searchParams.get("q"), /alternative/);
+  assert.equal(bot.searches[1].searchParams.get("count"), "50");
+  assert.equal(bot.searches[1].searchParams.get("safesearch"), "off");
+  assert.equal(bot.thumbnails.length, 20);
+});
+
+test("does not broaden the search after a verification service error", async () => {
   const error = new Error("Unauthorized");
   const bot = setup(["SpongeBob from SpongeBob SquarePants pfp", error]);
-  await assert.rejects(bot.chooseCharacterAvatar(character), (failure) => failure.cause === error);
+  await assert.rejects(bot.findCharacterAvatars(character), (failure) => failure.cause === error);
   assert.equal(bot.calls.length, 2);
-  assert.equal(bot.thumbnails.length, 5);
+  assert.equal(bot.searches.length, 1);
+  assert.equal(bot.thumbnails.length, 10);
 });

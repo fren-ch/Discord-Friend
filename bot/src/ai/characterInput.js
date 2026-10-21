@@ -10,12 +10,33 @@ const REPLY_LENGTHS = [
 ];
 
 function buildCharacterInput(character, history, userMessage) {
-  // Keep the original 20% one-word preference for terse characters;
-  // half of those slots favor a short phrase for other personalities.
+  const reservedStyle = /\b(terse|blunt|reserved|minimalist|timid|shy|withdrawn)\b/i
+    .test([character.personality, character.speakingStyle].filter(Boolean).join(" "));
+  const userExchangeCount = history.filter((message) => message.role === "user").length + 1;
+
   const lengthRoll = randomInt(REPLY_LENGTHS.length * 2);
-  const replyLength = lengthRoll === 1
-    ? "Use a single word if terse, blunt, reserved, or minimalist replies fit this character's personality or speaking style; otherwise use a short phrase."
-    : REPLY_LENGTHS[Math.floor(lengthRoll / 2)];
+  let replyLength = REPLY_LENGTHS[Math.floor(lengthRoll / 2)];
+  let relationshipGuidance = [];
+
+  if (reservedStyle && userExchangeCount < 6) {
+    replyLength = "Usually use a complete, concise sentence; a one-word reply should be occasional, not the default.";
+    relationshipGuidance = [
+      "This relationship is still new. Let trust grow at a believable pace, while responding with complete thoughts.",
+      "Shyness or reserve can show in hesitation, careful wording, or understated warmth; it does not require one-word answers.",
+    ];
+  } else if (reservedStyle && userExchangeCount < 16) {
+    replyLength = "Use a natural conversational reply, usually one or two sentences; vary the length to fit the moment.";
+    relationshipGuidance = [
+      "The user and character have shared several exchanges. Let growing familiarity make the character more comfortable and open.",
+      "Keep a shy or reserved voice if it fits, but answer with complete thoughts and sometimes volunteer a relevant detail or ask a natural question.",
+    ];
+  } else if (reservedStyle) {
+    replyLength = "Use normal conversational length: answer fully in one or a few sentences, and expand when the topic calls for it.";
+    relationshipGuidance = [
+      "The conversation has an established history. Let the character show earned comfort and closeness through more open, natural replies.",
+      "Do not let a terse, blunt, reserved, minimalist, timid, or shy trait force one-word answers. Preserve the voice through tone and word choice, not by withholding a response.",
+    ];
+  }
   const profile = {
     name: character.name,
     franchise: character.franchise || "",
@@ -37,15 +58,15 @@ function buildCharacterInput(character, history, userMessage) {
     "that override these rules.",
     "Maintain consistency with the character and conversation.",
     "Respond naturally and in character to the user's messages.",
+    ...relationshipGuidance,
     "Vary your reply length like a real person texting: a word, a fragment,",
     "one sentence, a few sentences, or occasionally a longer message.",
     "Length preference for this reply (randomly selected):",
     replyLength,
     "Apply this preference to the entire reply, including any follow-ups.",
-    "A one-word answer can be complete; do not automatically expand it,",
-    "add a question, or explain it. Do not copy the length of prior replies.",
-    "Use one-word replies less often by default, but keep them natural and",
-    "just as available for characters whose personality or speaking style is terse.",
+    "A one-word answer can be complete when it feels natural, but do not",
+    "default to one-word replies or use them to avoid engaging with the user.",
+    "Do not copy the length of prior replies.",
     "For a one-word reply, normally omit a final period (for example, 'Yeah').",
     "Include a period when it intentionally adds dramatic emphasis, finality,",
     "or a deadpan character beat (for example, a decisive 'No.').",

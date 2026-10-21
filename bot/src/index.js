@@ -24,7 +24,10 @@ const {
 
 const { buildCharacterModal } = require("./commands/character");
 const {
+  handleCharacterAvatarCommand,
+  handleCharacterAvatarMore,
   handleCharacterAvatarRetry,
+  handleCharacterAvatarSelect,
   handleCharacterModal,
 } = require("./interactions/characterModal");
 const { buildCharacterInput } = require("./ai/characterInput");
@@ -166,6 +169,26 @@ async function generateReplyWhileTyping(channel, aiInput) {
 
 client.on(Events.MessageCreate, lifecycle.handle(async (message) => {
   if (message.author.bot || message.webhookId) {
+    return;
+  }
+
+  if (message.inGuild() && message.content.trim().toLowerCase() === "!help") {
+    const helpEmbed = new EmbedBuilder()
+      .setTitle("Character Bot Help")
+      .setDescription("Manage your characters with these slash commands:")
+      .addFields(
+        { name: "/character create", value: "Create and save a character." },
+        { name: "/character chat", value: "Start or continue a chat with one of your characters." },
+        { name: "/character view", value: "View a saved character's details." },
+        { name: "/character avatar", value: "Change a saved character's profile picture." },
+        { name: "/character delete", value: "Delete a character and its saved chat history." }
+      )
+      .setFooter({ text: "Use these commands in a server text channel." });
+
+    await message.reply({
+      embeds: [helpEmbed],
+      allowedMentions: { parse: [] },
+    });
     return;
   }
 
@@ -363,6 +386,22 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
     }
 
     if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId.startsWith("character:avatar:select:")
+    ) {
+      await handleCharacterAvatarSelect(interaction);
+      return;
+    }
+
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith("character:avatar:more:")
+    ) {
+      await handleCharacterAvatarMore(interaction);
+      return;
+    }
+
+    if (
       interaction.isButton() &&
       interaction.customId.startsWith("character:delete:")
     ) {
@@ -446,7 +485,9 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
     if (
       interaction.isAutocomplete() &&
       interaction.commandName === "character" &&
-      ["chat", "delete", "view"].includes(interaction.options.getSubcommand())
+      (
+        ["avatar", "chat", "delete", "view"].includes(interaction.options.getSubcommand())
+      )
     ) {
       const search = interaction.options.getFocused().toLowerCase();
       const characters = await getCharactersByOwner(interaction.user.id);
@@ -516,6 +557,11 @@ client.on(Events.InteractionCreate, lifecycle.handle(async (interaction) => {
 
       if (subcommand === "create") {
         await interaction.showModal(buildCharacterModal());
+        return;
+      }
+
+      if (subcommand === "avatar") {
+        await handleCharacterAvatarCommand(interaction);
         return;
       }
 

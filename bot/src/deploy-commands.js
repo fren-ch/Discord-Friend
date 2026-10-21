@@ -56,6 +56,18 @@ const characterCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("avatar")
+      .setDescription("Change a saved character's profile picture")
+      .addStringOption((option) =>
+        option
+          .setName("character")
+          .setDescription("Choose your character")
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("delete")
       .setDescription("Delete one of your characters")
       .addStringOption((option) =>

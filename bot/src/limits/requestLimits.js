@@ -61,6 +61,21 @@ function reserveCreation(userId) {
   };
 }
 
+function reserveAvatarLookup(userId) {
+  const state = userState(userId);
+  if (state.creating) {
+    throw new LimitError("Your previous character lookup is still in progress.");
+  }
+  state.creating = true;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      state.creating = false;
+    }
+  };
+}
+
 async function withGeminiSlot(task) {
   if (geminiActive < MAX_GEMINI_ACTIVE) {
     geminiActive += 1;
@@ -112,4 +127,10 @@ setInterval(() => {
   }
 }, 60000).unref();
 
-module.exports = { LimitError, reserveChat, reserveCreation, generateWithLimit };
+module.exports = {
+  LimitError,
+  reserveChat,
+  reserveCreation,
+  reserveAvatarLookup,
+  generateWithLimit,
+};

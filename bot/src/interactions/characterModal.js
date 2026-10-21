@@ -260,6 +260,14 @@ async function handleCharacterAvatarCommand(interaction) {
       return;
     }
 
+    if (character.originalCharacter && !character.avatarUrl) {
+      await interaction.editReply({
+        content: `${character.name} is marked as an original character and has no avatar yet. Upload your own image by choosing this character and attaching an image with the image option.`,
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
     release = reserveAvatarLookup(interaction.user.id);
     const avatarUrls = await findCharacterAvatars(character);
     const selection = avatarSelectionMessage(id, interaction.user.id, avatarUrls);
@@ -332,23 +340,31 @@ async function saveNewCharacter(interaction, character) {
     }
 
     let avatarUrls = [];
-    try {
-      avatarUrls = await findCharacterAvatars(character);
-      character.avatarUrl = avatarUrls[0];
-    } catch (error) {
-      console.error("Character avatar lookup failed; saving without an avatar:", error);
+    if (character.originalCharacter) {
       character.avatarUrl = null;
+    } else {
+      try {
+        avatarUrls = await findCharacterAvatars(character);
+        character.avatarUrl = avatarUrls[0];
+      } catch (error) {
+        console.error("Character avatar lookup failed; saving without an avatar:", error);
+        character.avatarUrl = null;
+      }
     }
     const saved = await saveCharacter(character);
     const avatarSelection = avatarUrls.length
       ? avatarSelectionMessage(saved._id, interaction.user.id, avatarUrls)
       : null;
     await interaction.editReply({
-      content: `Created ${character.name}. You can now chat with ${character.name} by using /character chat.`
-        + (avatarSelection
-          ? " Choose an avatar image below, or keep the first option."
-          : " Avatar lookup failed, but your character information is saved. You can retry without filling out the form again."),
-      ...(avatarSelection || { components: [avatarRetryRow(saved._id)] }),
+      content: character.originalCharacter
+        ? `Created ${character.name} as an original character. I skipped online avatar lookup. You can chat with ${character.name} using /character chat, and upload an avatar later with /character avatar.`
+        : `Created ${character.name}. You can now chat with ${character.name} by using /character chat.`
+          + (avatarSelection
+            ? " Choose an avatar image below, or keep the first option."
+            : " Avatar lookup failed, but your character information is saved. You can retry without filling out the form again."),
+      ...(character.originalCharacter
+        ? {}
+        : avatarSelection || { components: [avatarRetryRow(saved._id)] }),
       allowedMentions: { parse: [] },
     });
   } catch (error) {
@@ -374,6 +390,7 @@ async function handleCharacterModal(interaction) {
       personality: interaction.fields.getTextInputValue("personality").trim(),
       backstory: interaction.fields.getTextInputValue("backstory").trim(),
       franchise: interaction.fields.getTextInputValue("franchise").trim(),
+      originalCharacter: interaction.fields.getCheckbox?.("originalCharacter") ?? false,
     };
 
     if (!character.name) {

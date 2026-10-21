@@ -6,6 +6,7 @@
 const {
   ModalBuilder,
   LabelBuilder,
+  CheckboxBuilder,
   TextInputBuilder,
   TextInputStyle,
 } = require("discord.js");
@@ -68,6 +69,15 @@ function buildCharacterModal() {
     for (const field of fields) {
         addField(modal, field);
     }
+
+    const originalCharacterLabel = new LabelBuilder()
+        .setLabel("Original character (skip avatar search)")
+        .setCheckboxComponent(
+            new CheckboxBuilder()
+                .setCustomId("originalCharacter")
+                .setDefault(false)
+        );
+    modal.addLabelComponents(originalCharacterLabel);
 
     return modal;
 }

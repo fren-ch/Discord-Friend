@@ -228,7 +228,6 @@ async function handleCharacterAvatarCommand(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let release;
   try {
-    release = reserveAvatarLookup(interaction.user.id);
     const id = interaction.options.getString("character", true);
     const character = await getCharacterById(id, interaction.user.id);
     if (!character) {
@@ -238,6 +237,30 @@ async function handleCharacterAvatarCommand(interaction) {
       return;
     }
 
+    const uploadedImage = interaction.options.getAttachment("image");
+    if (uploadedImage) {
+      if (!uploadedImage.contentType?.startsWith("image/")) {
+        await interaction.editReply("Please upload an image file, such as PNG, JPG, or GIF.");
+        return;
+      }
+
+      const updated = await updateCharacterAvatar(id, interaction.user.id, uploadedImage.url);
+      if (!updated) {
+        await interaction.editReply("I could not find that profile in your saved characters.");
+        return;
+      }
+
+      await interaction.editReply({
+        content: `Uploaded avatar updated for ${character.name}.`,
+        embeds: [{
+          image: { url: uploadedImage.url },
+        }],
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    release = reserveAvatarLookup(interaction.user.id);
     const avatarUrls = await findCharacterAvatars(character);
     const selection = avatarSelectionMessage(id, interaction.user.id, avatarUrls);
     await interaction.editReply({

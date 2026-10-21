@@ -2,7 +2,7 @@ const { generateWithLimit } = require("../limits/requestLimits");
 const { GoogleGenAI } = require("@google/genai");
 
 const DEFAULT_AVATAR_URL =
-  "https://api.dicebear.com/9.x/bottts/png?seed=default";
+  "https://cdn.discordapp.com/embed/avatars/0.png";
 
 class AvatarLookupError extends Error {
   constructor(cause) {
@@ -77,7 +77,8 @@ async function buildAvatarQuery(character, expanded = false, alternate = false) 
         max_output_tokens: 1024,
       },
     },
-    { timeout: 10000, maxRetries: 0 }
+    // Retry temporary overloads/rate limits with the SDK's backoff strategy.
+    { timeout: 10000, maxRetries: 2 }
   );
 
   const query = response.output_text?.trim();
@@ -322,7 +323,8 @@ async function verifyAvatarImages(character, results, searchQuery, diverse = fal
         max_output_tokens: 1024,
       },
     },
-    { timeout: 15000, maxRetries: 0 }
+    // Image verification can also hit temporary Gemini overloads.
+    { timeout: 15000, maxRetries: 2 }
   );
 
   const answer = response.output_text?.trim() || "";

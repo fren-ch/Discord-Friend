@@ -65,6 +65,12 @@ const characterCommand = new SlashCommandBuilder()
           .setRequired(true)
           .setAutocomplete(true)
       )
+      .addAttachmentOption((option) =>
+        option
+          .setName("image")
+          .setDescription("Upload an image, or leave blank to search for one")
+          .setRequired(false)
+      )
   )
   .addSubcommand((subcommand) =>
     subcommand

@@ -631,9 +631,11 @@ The bot registers a global `/character` command with these subcommands:
 - `/character create` opens a two-step form for a character's name, optional franchise/source, personality, backstory, speaking style, and greeting. The name is the only required field. Supplying the franchise/source helps Gemini identify the right character and find a matching avatar.
 - `/character list` privately lists the user's saved profiles, including their IDs. Each user can save up to 10 profiles.
 - `/character view` privately displays a profile when its ID belongs to the user.
+- `/character avatar` lets you upload an image or search for and choose a new profile picture for one of your saved characters.
 - `/character delete` lets you choose an owned profile by name, then asks for confirmation before deleting it, its saved conversation history, and its Discord chat threads.
+- `!help` posts a quick guide to the character commands in a server channel.
 
-Character creation requires a successful image search and Gemini verification of a suitable avatar. If lookup fails, no character is saved. Each saved MongoDB document includes `ownerUserId`, the form fields, `avatarUrl`, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
+Character creation searches for and verifies up to 10 avatar images. If a `pfp` search finds no suitable image, it broadens the query to character portraits, artwork, and (for game characters) screenshots and gameplay images. The first verified result is used by default; an ephemeral image picker lets the user preview and choose another result, or request 10 different images. Follow-up searches request 50 results with SafeSearch disabled, sample across those results, and allow any image category when the character is identifiable; previously shown image URLs are excluded. Follow-up searches do not use the character-creation cooldown, although simultaneous lookups for the same user are still prevented. If lookup fails, the character is still saved and the avatar lookup can be retried. Each saved MongoDB document includes `ownerUserId`, the form fields, `avatarUrl`, `createdAt`, and `updatedAt`. MongoDB adds the document `_id`. Profiles are filtered by the invoking Discord user's ID for list and view operations.
 
 The database defaults to `discord_friend`. Character profiles are stored in `characters`; conversations and message history are stored in `conversations`. The bot creates the indexes it needs during startup.
 
@@ -861,6 +863,5 @@ No manual webhook setup is required from server owners.
   thread membership, and the runtime logs.
 - **Character creation reports an avatar lookup failure:** Check the
   `Avatar lookup failed:` log, confirm Gemini and Brave Search credentials and
-  quota, and retry. A character is saved only after a suitable avatar is found
-  and verified. Characters created before this requirement may still have a
-  fallback avatar saved.
+  quota, and use the avatar retry button on the saved character. Character
+  details are saved even when no suitable image is found.

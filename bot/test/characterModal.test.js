@@ -10,9 +10,12 @@ function setup({
   avatarBatches,
   avatarExclusions,
   avatarGate,
+  checkedBatches,
+  croppedAvatar = null,
 } = {}) {
   const saved = [];
   const updated = [];
+  const lookups = [];
   let avatarCalls = 0;
   let released = 0;
   const activeLookups = new Set();
@@ -40,6 +43,11 @@ function setup({
         ButtonStyle: { Primary: 1, Secondary: 2 }, MessageFlags: { Ephemeral: 64 },
       };
       if (name === "../database/characters") return {
+        async recordAvatarImagesChecked(id, owner, urls) {
+          const character = saved.find(entry => entry._id === id && entry.ownerUserId === owner);
+          assert.ok(character);
+          character.avatarCheckedUrls = [...new Set([...(character.avatarCheckedUrls || []), ...urls])];
+        },
         getCharactersByOwner: async () => [],
         getCharacterById: async (id, owner) => saved.find((character) => character._id === id && character.ownerUserId === owner),
         async updateCharacterAvatar(id, owner, avatarUrl) {
@@ -54,10 +62,18 @@ function setup({
         },
       };
       if (name === "../commands/character") return { buildCharacterDetailsModal() {} };
+      if (name === "../ai/gemini") return {
+        async generateCharacterGreeting(character) { return `Hi, I'm ${character.name}!`; },
+      };
+      if (name === "../ai/avatarCrop") return {
+        async cropUploadedAvatar() { return croppedAvatar; },
+      };
       if (name === "../ai/characterAvatar") return {
-        async findCharacterAvatars(character, excludedUrls) {
+        async findCharacterAvatars(character, excludedUrls, onImagesChecked) {
+          lookups.push([...(excludedUrls || [])]);
           const callIndex = avatarCalls++;
           if (avatarGate && callIndex > 0) await avatarGate;
+          if (checkedBatches?.[callIndex]) await onImagesChecked(checkedBatches[callIndex]);
           if (avatarError) throw avatarError;
           if (avatarBatches) {
             const batch = avatarBatches[callIndex];
@@ -93,7 +109,7 @@ function setup({
     },
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../src/interactions/characterModal.js"), "utf8"), context);
-  return { ...context.module.exports, saved, updated, released: () => released };
+  return { ...context.module.exports, saved, updated, lookups, released: () => released };
 }
 
 function interaction(backstory = "") {
@@ -113,6 +129,7 @@ function interaction(backstory = "") {
 function avatarCommandInteraction(characterId) {
   const command = interaction();
   command.options = {
+    getAttachment: () => null,
     getString: (name, required) => {
       assert.equal(name, "character");
       assert.equal(required, true);
@@ -122,6 +139,49 @@ function avatarCommandInteraction(characterId) {
   return command;
 }
 
+test("uploaded avatar saves the Discord URL for the cropped image", async () => {
+  const croppedAvatar = Buffer.from("cropped-pixels");
+  const bot = setup({ croppedAvatar });
+  await bot.handleCharacterModal(interaction());
+  const command = avatarCommandInteraction("saved-character");
+  command.options.getAttachment = () => ({ contentType: "image/png", url: "https://cdn.discordapp.com/original.png" });
+  command.editReply = async value => {
+    command.replies.push(value);
+    return { attachments: { first: () => ({ url: "https://cdn.discordapp.com/cropped.png" }) } };
+  };
+  await bot.handleCharacterAvatarCommand(command);
+  assert.equal(command.replies[0].files[0].attachment, croppedAvatar);
+  assert.equal(bot.updated[0].avatarUrl, "https://cdn.discordapp.com/cropped.png");
+  assert.match(command.replies.at(-1).content, /cropped around the face/);
+  assert.equal(bot.released(), 2);
+});
+
+test("uploaded avatar keeps the original when cropping is unavailable", async () => {
+  const bot = setup();
+  await bot.handleCharacterModal(interaction());
+  const command = avatarCommandInteraction("saved-character");
+  command.options.getAttachment = () => ({ contentType: "image/png", url: "https://cdn.discordapp.com/original.png" });
+  await bot.handleCharacterAvatarCommand(command);
+  assert.equal(bot.updated[0].avatarUrl, "https://cdn.discordapp.com/original.png");
+  assert.equal(command.replies[0].files, undefined);
+  assert.match(command.replies[0].content, /kept the original/);
+});
+
+test("failed crop upload does not overwrite the saved avatar", async () => {
+  const bot = setup({ croppedAvatar: Buffer.from("cropped-pixels") });
+  await bot.handleCharacterModal(interaction());
+  const command = avatarCommandInteraction("saved-character");
+  command.options.getAttachment = () => ({ contentType: "image/png", url: "https://cdn.discordapp.com/original.png" });
+  command.editReply = async value => {
+    if (value.files) throw new Error("Upload failed");
+    command.replies.push(value);
+  };
+  await bot.handleCharacterAvatarCommand(command);
+  assert.equal(bot.updated.length, 0);
+  assert.match(command.replies[0].content, /couldn't update/);
+  assert.equal(bot.released(), 2);
+});
+
 test("blank and whitespace-only backstories save without a second prompt", async () => {
   for (const backstory of ["", " \n "]) {
     const bot = setup();
@@ -129,6 +189,7 @@ test("blank and whitespace-only backstories save without a second prompt", async
     await bot.handleCharacterModal(form);
     assert.equal(bot.saved.length, 1);
     assert.equal(bot.saved[0].avatarUrl, "https://example.com/avatar.png");
+    assert.equal(bot.saved[0].greeting, "Hi, I'm Test!");
     assert.match(form.replies[0].content, /Created Test.*Choose an avatar image below/);
     assert.equal(form.replies[0].components.length, 2);
     assert.equal(form.replies[0].embeds.length, 2);
@@ -144,7 +205,9 @@ test("avatar lookup failure still saves the character", async () => {
   await bot.handleCharacterModal(form);
   assert.equal(bot.saved.length, 1);
   assert.equal(bot.saved[0].avatarUrl, null);
-  assert.match(form.replies[0].content, /Avatar lookup failed.*information is saved/);
+  assert.equal(bot.saved[0].greeting, "Hi, I'm Test!");
+  assert.match(form.replies[0].content, /Test was saved, but I couldn't find a suitable picture/);
+  assert.match(form.replies[0].content, /upload a picture manually using \/character avatar: select your character and attach a picture with the image option/);
   assert.match(form.replies[0].content, /chat with Test by using \/character chat/);
   assert.equal(form.replies[0].components.length, 1);
   assert.equal(bot.released(), 1);
@@ -160,10 +223,12 @@ test("retry updates the saved character without creating another character", asy
   assert.equal(bot.saved.length, 1);
   assert.equal(bot.updated.length, 1);
   assert.equal(bot.updated[0].id, "saved-character");
-  assert.match(button.replies[0].content, /Updated the avatar for Test.*Choose another option/);
-  assert.equal(button.replies[0].components[0].components[0].options.length, 2);
+  assert.match(button.replies[0].content, /Loading new avatar images/);
+  assert.equal(button.replies[0].components[0].components[0].disabled, true);
+  assert.match(button.replies[1].content, /Updated the avatar for Test.*Choose another option/);
+  assert.equal(button.replies[1].components[0].components[0].options.length, 2);
 
-  const menu = button.replies[0].components[0].components[0];
+  const menu = button.replies[1].components[0].components[0];
   const selection = interaction();
   selection.customId = menu.customId;
   selection.values = ["1"];
@@ -186,7 +251,7 @@ test("avatar command previews choices and changes the picture only after selecti
   ];
   const bot = setup({
     avatarBatches: [originalBatch, newBatch],
-    avatarExclusions: [undefined, undefined],
+    avatarExclusions: [undefined, originalBatch],
   });
   await bot.handleCharacterModal(interaction());
 
@@ -284,8 +349,52 @@ test("failed retry preserves saved details and allows another retry", async () =
   await bot.handleCharacterAvatarRetry(button);
   assert.equal(bot.saved.length, 1);
   assert.equal(bot.updated.length, 0);
-  assert.match(button.replies[0].content, /still saved/);
-  assert.equal(button.replies[0].components, undefined);
+  assert.match(button.replies[1].content, /still saved/);
+  assert.equal(button.replies[1].components[0].components[0].disabled, false);
+});
+
+test("failed retries persist rejected candidates and exclude them on the next attempt", async () => {
+  const checkedBatches = [
+    ["https://example.com/rejected-1", "https://example.com/rejected-2"],
+    ["https://example.com/rejected-3"],
+    ["https://example.com/rejected-4"],
+  ];
+  const bot = setup({ avatarError: new Error("No suitable image"), checkedBatches });
+  await bot.handleCharacterModal(interaction());
+  assert.equal(bot.saved[0].avatarCheckedUrls.join(","), checkedBatches[0].join(","));
+  for (let index = 0; index < 2; index++) {
+    const button = interaction();
+    button.customId = "character:avatar:retry:saved-character";
+    await bot.handleCharacterAvatarRetry(button);
+    assert.equal(bot.lookups[index + 1].join(","), checkedBatches.slice(0, index + 1).flat().join(","));
+    assert.equal(button.replies.at(-1).components[0].components[0].disabled, false);
+  }
+  assert.equal(bot.saved[0].avatarCheckedUrls.join(","), checkedBatches.flat().join(","));
+  assert.equal(bot.updated.length, 0);
+});
+
+test("retry immediately shows loading and blocks overlapping clicks", async () => {
+  let releaseLookup;
+  const avatarGate = new Promise(resolve => { releaseLookup = resolve; });
+  const bot = setup({ avatarGate });
+  await bot.handleCharacterModal(interaction());
+  const button = interaction();
+  button.customId = "character:avatar:retry:saved-character";
+  const pending = bot.handleCharacterAvatarRetry(button);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(button.replies[0].content, /Loading new avatar images/);
+  assert.equal(button.replies[0].components[0].components[0].label, "Loading images...");
+  assert.equal(button.replies[0].components[0].components[0].disabled, true);
+  assert.equal(bot.updated.length, 0);
+  const repeated = interaction();
+  repeated.customId = button.customId;
+  await bot.handleCharacterAvatarRetry(repeated);
+  assert.match(repeated.replies[0].content, /already in progress/);
+  assert.equal(bot.lookups.length, 2);
+  releaseLookup();
+  await pending;
+  assert.match(button.replies[1].content, /Updated the avatar/);
+  assert.equal(bot.released(), 2);
 });
 
 test("retry cannot update another user's character", async () => {
@@ -297,7 +406,7 @@ test("retry cannot update another user's character", async () => {
   button.deferUpdate = async () => {};
   await bot.handleCharacterAvatarRetry(button);
   assert.equal(bot.updated.length, 0);
-  assert.match(button.replies[0].content, /no longer available/);
+  assert.match(button.replies[1].content, /no longer available/);
 });
 
 test("avatar choices cannot be selected by another user", async () => {

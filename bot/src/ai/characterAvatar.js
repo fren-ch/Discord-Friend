@@ -115,7 +115,7 @@ function validImageUrl(value) {
   }
 }
 
-async function searchCharacterImages(character, query, excludedUrls = [], diverse = false) {
+async function searchCharacterImages(character, query, excludedUrls = [], diverse = false, onImagesChecked = async () => {}) {
   console.log("Brave image search query:", query);
 
   const url = new URL(
@@ -142,14 +142,20 @@ async function searchCharacterImages(character, query, excludedUrls = [], divers
   }
 
   const data = await response.json();
-  const searchResults = data.results || [];
+  const excluded = new Set(excludedUrls);
+  const uniqueUrls = new Set();
+  const searchResults = (data.results || []).filter(result => {
+    const imageUrl = validImageUrl(result.thumbnail?.src);
+    if (!imageUrl || excluded.has(imageUrl) || uniqueUrls.has(imageUrl)) return false;
+    uniqueUrls.add(imageUrl);
+    return true;
+  });
   const results = diverse && searchResults.length > 10
     ? Array.from({ length: 10 }, (_, index) =>
       searchResults[Math.floor(index * (searchResults.length - 1) / 9)]
     )
     : searchResults.slice(0, 10);
-  const avatarUrls = await verifyAvatarImages(character, results, query, diverse);
-  const excluded = new Set(excludedUrls);
+  const avatarUrls = await verifyAvatarImages(character, results, query, diverse, onImagesChecked);
   const freshUrls = avatarUrls.filter((imageUrl) => !excluded.has(imageUrl));
   if (!freshUrls.length) {
     throw new NoSuitableAvatarError("Image search returned no new suitable images");
@@ -157,7 +163,12 @@ async function searchCharacterImages(character, query, excludedUrls = [], divers
   return freshUrls;
 }
 
-async function findCharacterAvatars(character, excludedUrls = []) {
+async function findCharacterAvatars(character, excludedUrls = [], onImagesChecked = async () => {}) {
+  excludedUrls = [...excludedUrls];
+  const rememberChecked = async urls => {
+    await onImagesChecked(urls);
+    excludedUrls.push(...urls.filter(url => !excludedUrls.includes(url)));
+  };
   try {
     if (!process.env.BRAVE_SEARCH_API_KEY) {
       throw new Error("Missing BRAVE_SEARCH_API_KEY in bot/.env");
@@ -165,12 +176,12 @@ async function findCharacterAvatars(character, excludedUrls = []) {
 
     if (excludedUrls.length) {
       const alternateQuery = await buildAvatarQuery(character, true, true);
-      return await searchCharacterImages(character, alternateQuery, excludedUrls, true);
+      return await searchCharacterImages(character, alternateQuery, excludedUrls, true, rememberChecked);
     }
 
     const query = await buildAvatarQuery(character);
     try {
-      return await searchCharacterImages(character, query);
+      return await searchCharacterImages(character, query, excludedUrls, false, rememberChecked);
     } catch (error) {
       if (!(error instanceof NoSuitableAvatarError)) throw error;
       console.info("No suitable avatar from pfp search; broadening image search.");
@@ -180,14 +191,14 @@ async function findCharacterAvatars(character, excludedUrls = []) {
     if (expandedQuery.toLowerCase() === query.toLowerCase()) {
       throw new NoSuitableAvatarError("Expanded image search repeated the original query");
     }
-    return await searchCharacterImages(character, expandedQuery);
+    return await searchCharacterImages(character, expandedQuery, excludedUrls, false, rememberChecked);
   } catch (error) {
     console.warn("Avatar lookup failed:", error.message);
     throw new AvatarLookupError(error);
   }
 }
 
-async function verifyAvatarImages(character, results, searchQuery, diverse = false) {
+async function verifyAvatarImages(character, results, searchQuery, diverse = false, onImagesChecked = async () => {}) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("Missing GEMINI_API_KEY for image verification");
   }
@@ -266,6 +277,10 @@ async function verifyAvatarImages(character, results, searchQuery, diverse = fal
   if (!candidates.length) {
     throw new NoSuitableAvatarError("No thumbnails could be checked");
   }
+
+  // Persist every candidate before verification, including images Gemini rejects
+  // and attempts interrupted by a service error.
+  await onImagesChecked(candidates.map(candidate => candidate.url));
 
   const response = await generateWithLimit(ai, 
     {

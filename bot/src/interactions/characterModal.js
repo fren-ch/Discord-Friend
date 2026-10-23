@@ -6,8 +6,10 @@ const {
   MessageFlags,
 } = require("discord.js");
 const { randomUUID } = require("node:crypto");
-const { saveCharacter, getCharactersByOwner, getCharacterById, updateCharacterAvatar } = require("../database/characters");
+const { saveCharacter, getCharactersByOwner, getCharacterById, updateCharacterAvatar, recordAvatarImagesChecked } = require("../database/characters");
 const { findCharacterAvatars } = require("../ai/characterAvatar");
+const { cropUploadedAvatar } = require("../ai/avatarCrop");
+const { generateCharacterGreeting } = require("../ai/gemini");
 const {
   LimitError,
   reserveAvatarLookup,
@@ -17,12 +19,28 @@ const {
 const pendingAvatarSelections = new Map();
 const AVATAR_SELECTION_TTL = 15 * 60 * 1000;
 
-function avatarRetryRow(characterId) {
+async function lookupCharacterAvatars(character, excludedUrls = []) {
+  const checked = new Set(character.avatarCheckedUrls || []);
+  const remember = async urls => {
+    const fresh = urls.filter(url => !checked.has(url));
+    if (!fresh.length) return;
+    if (character._id) await recordAvatarImagesChecked(String(character._id), character.ownerUserId, fresh);
+    fresh.forEach(url => checked.add(url));
+    character.avatarCheckedUrls = [...checked];
+  };
+  const excluded = [...new Set([...excludedUrls, ...checked])];
+  const urls = await findCharacterAvatars(character, excluded.length ? excluded : undefined, remember);
+  await remember(urls);
+  return urls;
+}
+
+function avatarRetryRow(characterId, loading = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`character:avatar:retry:${characterId}`)
-      .setLabel("Retry avatar lookup")
+      .setLabel(loading ? "Loading images..." : "Retry avatar lookup")
       .setStyle(ButtonStyle.Primary)
+      .setDisabled(loading)
   );
 }
 
@@ -187,7 +205,7 @@ async function handleCharacterAvatarMore(interaction) {
       return;
     }
 
-    const avatarUrls = await findCharacterAvatars(character, selection.seenAvatarUrls);
+    const avatarUrls = await lookupCharacterAvatars(character, selection.seenAvatarUrls);
     pendingAvatarSelections.delete(token);
     const nextSelection = avatarSelectionMessage(
       selection.characterId,
@@ -244,16 +262,34 @@ async function handleCharacterAvatarCommand(interaction) {
         return;
       }
 
-      const updated = await updateCharacterAvatar(id, interaction.user.id, uploadedImage.url);
+      release = reserveAvatarLookup(interaction.user.id);
+      const cropped = await cropUploadedAvatar(uploadedImage, character);
+      let avatarUrl = uploadedImage.url;
+      if (cropped) {
+        // Discord hosts the processed image; save its URL rather than the
+        // attachment:// reference used for the upload preview.
+        const message = await interaction.editReply({
+          content: `Saving face-centered avatar for ${character.name}...`,
+          files: [{ attachment: cropped, name: "character-avatar.png" }],
+          embeds: [{ image: { url: "attachment://character-avatar.png" } }],
+          allowedMentions: { parse: [] },
+        });
+        avatarUrl = message.attachments.first()?.url;
+        if (!avatarUrl) throw new Error("Discord did not return the cropped avatar attachment");
+      }
+
+      const updated = await updateCharacterAvatar(id, interaction.user.id, avatarUrl);
       if (!updated) {
         await interaction.editReply("I could not find that profile in your saved characters.");
         return;
       }
 
       await interaction.editReply({
-        content: `Uploaded avatar updated for ${character.name}.`,
+        content: cropped
+          ? `Uploaded avatar updated for ${character.name}, cropped around the face.`
+          : `Uploaded avatar updated for ${character.name}. I kept the original image because face cropping was unavailable.`,
         embeds: [{
-          image: { url: uploadedImage.url },
+          image: { url: avatarUrl },
         }],
         allowedMentions: { parse: [] },
       });
@@ -269,7 +305,7 @@ async function handleCharacterAvatarCommand(interaction) {
     }
 
     release = reserveAvatarLookup(interaction.user.id);
-    const avatarUrls = await findCharacterAvatars(character);
+    const avatarUrls = await lookupCharacterAvatars(character);
     const selection = avatarSelectionMessage(id, interaction.user.id, avatarUrls);
     await interaction.editReply({
       content: `Choose a new profile picture for ${character.name}. Its current picture will stay until you select one.`,
@@ -283,7 +319,7 @@ async function handleCharacterAvatarCommand(interaction) {
     await interaction.editReply({
       content: error instanceof LimitError
         ? error.message
-        : "I couldn't find new profile pictures right now. Your character's current picture is unchanged; please try again later.",
+        : "I couldn't update the profile picture right now. Please try again later.",
       allowedMentions: { parse: [] },
     });
   } finally {
@@ -294,17 +330,32 @@ async function handleCharacterAvatarCommand(interaction) {
 async function handleCharacterAvatarRetry(interaction) {
   const prefix = "character:avatar:retry:";
   if (!interaction.customId.startsWith(prefix)) return;
-  await interaction.deferUpdate();
+  const id = interaction.customId.slice(prefix.length);
   let release;
   try {
     release = reserveAvatarLookup(interaction.user.id);
-    const id = interaction.customId.slice(prefix.length);
+  } catch (error) {
+    await interaction.reply({
+      content: error instanceof LimitError ? error.message : "I couldn't start another avatar lookup right now.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  let acknowledged = false;
+  try {
+    await interaction.update({
+      content: "Loading new avatar images, excluding previously checked images...",
+      embeds: [],
+      components: [avatarRetryRow(id, true)],
+      allowedMentions: { parse: [] },
+    });
+    acknowledged = true;
     const character = await getCharacterById(id, interaction.user.id);
     if (!character) {
       await interaction.editReply({ content: "This saved character is no longer available.", components: [] });
       return;
     }
-    const avatarUrls = await findCharacterAvatars(character);
+    const avatarUrls = await lookupCharacterAvatars(character);
     const avatarUrl = avatarUrls[0];
     if (!await updateCharacterAvatar(id, interaction.user.id, avatarUrl)) {
       await interaction.editReply({ content: "This saved character is no longer available.", components: [] });
@@ -318,11 +369,14 @@ async function handleCharacterAvatarRetry(interaction) {
     });
   } catch (error) {
     if (!(error instanceof LimitError)) console.error("Character avatar retry failed:", error);
-    await interaction.editReply({
+    const message = {
       content: error instanceof LimitError ? error.message
-        : "I couldn't update the avatar. Your character information is still saved. You can retry the lookup.",
+        : "I couldn't find a new avatar. Your character information is still saved. You can retry the lookup, or manually upload a picture using /character avatar with the image option.",
+      components: [avatarRetryRow(id)],
       allowedMentions: { parse: [] },
-    });
+    };
+    if (acknowledged) await interaction.editReply(message);
+    else await interaction.reply({ ...message, flags: MessageFlags.Ephemeral });
   } finally {
     release?.();
   }
@@ -344,13 +398,14 @@ async function saveNewCharacter(interaction, character) {
       character.avatarUrl = null;
     } else {
       try {
-        avatarUrls = await findCharacterAvatars(character);
+        avatarUrls = await lookupCharacterAvatars(character);
         character.avatarUrl = avatarUrls[0];
       } catch (error) {
         console.error("Character avatar lookup failed; saving without an avatar:", error);
         character.avatarUrl = null;
       }
     }
+    character.greeting = await generateCharacterGreeting(character);
     const saved = await saveCharacter(character);
     const avatarSelection = avatarUrls.length
       ? avatarSelectionMessage(saved._id, interaction.user.id, avatarUrls)
@@ -358,10 +413,9 @@ async function saveNewCharacter(interaction, character) {
     await interaction.editReply({
       content: character.originalCharacter
         ? `Created ${character.name} as an original character. I skipped online avatar lookup. You can chat with ${character.name} using /character chat, and upload an avatar later with /character avatar.`
-        : `Created ${character.name}. You can now chat with ${character.name} by using /character chat.`
-          + (avatarSelection
-            ? " Choose an avatar image below, or keep the first option."
-            : " Avatar lookup failed, but your character information is saved. You can retry without filling out the form again."),
+        : avatarSelection
+          ? `Created ${character.name}. You can now chat with ${character.name} by using /character chat. Choose an avatar image below, or keep the first option.`
+          : `${character.name} was saved, but I couldn't find a suitable picture. Please upload a picture manually using /character avatar: select your character and attach a picture with the image option. You can still chat with ${character.name} by using /character chat.`,
       ...(character.originalCharacter
         ? {}
         : avatarSelection || { components: [avatarRetryRow(saved._id)] }),

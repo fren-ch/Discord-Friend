@@ -49,7 +49,8 @@ async function processDueCheckIns(client) {
       stage = "generate";
       const content = await generateCharacterCheckIn(
         character,
-        conversation.messages || []
+        conversation.messages || [],
+        conversation.recentCheckIns || []
       );
 
       // A user message or pause request during generation cancels this check-in.

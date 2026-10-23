@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "description": "An AI-powered Discord social agent.",
   "main": "src/index.js",
-  
   "scripts": {
-    "start": "node src/index.js", 
+    "start": "node src/index.js",
     "deploy:commands": "node src/deploy-commands.js"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.4",
-    "mongodb": "^7.7.0"
+    "mongodb": "^7.7.0",
+    "sharp": "^0.35.5"
   }
 }

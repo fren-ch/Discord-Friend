@@ -37,7 +37,7 @@ function setup(answers) {
               src: `https://imgs.search.brave.com/${
                 query.includes("alternative")
                   ? (i === 0 ? 1 : i + 10)
-                  : i + 1
+                  : query.endsWith("pfp") ? i + 1 : i + 101
               }`,
             },
           })) };
@@ -83,7 +83,7 @@ test("broadens the search to artwork and screenshots when pfp yields no acceptab
   ]);
   assert.equal(
     (await bot.findCharacterAvatars({ name: "Joker", franchise: "Persona 5" })).join(","),
-    "https://imgs.search.brave.com/1,https://imgs.search.brave.com/10"
+    "https://imgs.search.brave.com/101,https://imgs.search.brave.com/110"
   );
   assert.equal(bot.searches.length, 2);
   assert.match(bot.searches[1].searchParams.get("q"), /screenshot/);
@@ -114,7 +114,7 @@ test("follow-up searches filter out image URLs already shown", async () => {
     firstBatch
   );
   assert.equal(firstBatch.join(","), "https://imgs.search.brave.com/1,https://imgs.search.brave.com/2");
-  assert.equal(nextBatch.join(","), "https://imgs.search.brave.com/20");
+  assert.equal(nextBatch.join(","), "https://imgs.search.brave.com/11,https://imgs.search.brave.com/21");
   assert.match(bot.calls[2].system_instruction, /follow-up search/i);
   assert.match(bot.calls[2].system_instruction, /do not require a pfp.*any fixed category/i);
   assert.match(bot.calls[3].system_instruction, /prefer a varied spread across distinct images/i);
@@ -132,4 +132,37 @@ test("does not broaden the search after a verification service error", async () 
   assert.equal(bot.calls.length, 2);
   assert.equal(bot.searches.length, 1);
   assert.equal(bot.thumbnails.length, 10);
+});
+
+test("remembers rejected images and excludes them before downloading on retry", async () => {
+  const bot = setup([
+    "Joker from Persona 5 pfp", "none",
+    "Joker from Persona 5 character portrait artwork", "none",
+    "Joker from Persona 5 alternative artwork", "1",
+  ]);
+  const checked = [];
+  const remember = async urls => { checked.push(...urls); };
+  await assert.rejects(bot.findCharacterAvatars(character, [], remember), { name: "AvatarLookupError" });
+  assert.equal(checked.length, 20);
+  const oldUrls = [...checked];
+  const retryStart = bot.thumbnails.length;
+  const selected = await bot.findCharacterAvatars(character, oldUrls, remember);
+  assert.ok(selected.length > 0);
+  assert.ok(bot.thumbnails.slice(retryStart).every(url => !oldUrls.includes(url)));
+  assert.equal(checked.length, 30);
+});
+
+test("records checked candidates even if Gemini verification fails", async () => {
+  const bot = setup(["Joker from Persona 5 pfp", new Error("Service unavailable")]);
+  const checked = [];
+  await assert.rejects(bot.findCharacterAvatars(character, [], async urls => checked.push(...urls)));
+  assert.equal(checked.length, 10);
+});
+
+test("does not verify anything when all returned images were checked already", async () => {
+  const bot = setup(["Joker from Persona 5 alternative artwork"]);
+  const excluded = Array.from({ length: 60 }, (_, i) => `https://imgs.search.brave.com/${i}`);
+  await assert.rejects(bot.findCharacterAvatars(character, excluded), { name: "AvatarLookupError" });
+  assert.equal(bot.thumbnails.length, 0);
+  assert.equal(bot.calls.length, 1);
 });

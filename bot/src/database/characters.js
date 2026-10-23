@@ -105,6 +105,15 @@ async function updateCharacterAvatar(id, ownerUserId, avatarUrl) {
   return result.matchedCount === 1;
 }
 
+async function recordAvatarImagesChecked(id, ownerUserId, urls) {
+  if (!ObjectId.isValid(id)) throw new Error("Invalid character ID");
+  const result = await getCollection().updateOne(
+    { _id: new ObjectId(id), ownerUserId },
+    { $addToSet: { avatarCheckedUrls: { $each: urls } } }
+  );
+  if (result.matchedCount !== 1) throw new Error("Character no longer available");
+}
+
 async function getConversationsByCharacter(ownerUserId, characterId) {
   if (!conversationsCollection) {
     throw new Error("MongoDB has not been connected");
@@ -341,6 +350,10 @@ async function recordCheckInDelivery(conversationId, content, messageId) {
           $each: [{ role: "assistant", content, createdAt: now }],
           $slice: -250,
         },
+        recentCheckIns: {
+          $each: [{ content, messageId, createdAt: now }],
+          $slice: -20,
+        },
       },
     }
   );
@@ -486,6 +499,7 @@ module.exports = {
   connectToDatabase,
   saveCharacter,
   updateCharacterAvatar,
+  recordAvatarImagesChecked,
   getCharactersByOwner,
   getCharacterById,
   getConversationsByCharacter,
